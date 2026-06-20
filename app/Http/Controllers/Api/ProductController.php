@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\ProductImage;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class ProductController extends Controller
@@ -14,19 +16,33 @@ class ProductController extends Controller
     // =========================
     public function index(Request $request)
     {
-        $query = Product::with('category', 'images');
+        $query = Product::with('category', 'brand', 'images')
+            ->withAvg('reviews', 'rating')
+            ->withCount('reviews');
 
         // Filter by category
         if ($request->has('category_id')) {
             $query->where('category_id', $request->category_id);
         }
 
-        // Filter by search
+        // Filter by brand
+        if ($request->has('brand_id')) {
+            $query->where('brand_id', $request->brand_id);
+        }
+
+        // Filter by search (name, category name, brand name, SKU)
         if ($request->has('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('description', 'LIKE', "%{$search}%");
+                  ->orWhere('description', 'LIKE', "%{$search}%")
+                  ->orWhere('sku', 'LIKE', "%{$search}%")
+                  ->orWhereHas('category', function ($cq) use ($search) {
+                      $cq->where('name', 'LIKE', "%{$search}%");
+                  })
+                  ->orWhereHas('brand', function ($bq) use ($search) {
+                      $bq->where('name', 'LIKE', "%{$search}%");
+                  });
             });
         }
 
@@ -72,7 +88,9 @@ class ProductController extends Controller
     // =========================
     public function featured()
     {
-        $products = Product::with('category', 'images')
+        $products = Product::with('category', 'brand', 'images')
+            ->withAvg('reviews', 'rating')
+            ->withCount('reviews')
             ->where('is_active', true)
             ->where('featured', true)
             ->limit(8)
@@ -86,7 +104,10 @@ class ProductController extends Controller
     // =========================
     public function show($id)
     {
-        $product = Product::with('category', 'images')->findOrFail($id);
+        $product = Product::with('category', 'brand', 'images', 'reviews.user:id,first_name,last_name,avatar')
+            ->withAvg('reviews', 'rating')
+            ->withCount('reviews')
+            ->findOrFail($id);
         return response()->json($product);
     }
 
@@ -97,29 +118,49 @@ class ProductController extends Controller
     {
         $request->validate([
             'category_id' => 'required|exists:categories,id',
+            'brand_id' => 'nullable|exists:brands,id',
             'name' => 'required|string|max:255',
             'price' => 'required|numeric|min:0',
             'stock' => 'nullable|integer|min:0',
             'description' => 'nullable|string',
-            'brand' => 'nullable|string',
             'sku' => 'nullable|string|unique:products',
-            'thumbnail' => 'nullable|string',
+            'thumbnail' => 'nullable',
+            'video_url' => 'nullable|string',
+            'images' => 'nullable|array',
+            'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
         ]);
 
         $product = Product::create([
             'category_id' => $request->category_id,
+            'brand_id' => $request->brand_id,
             'name' => $request->name,
             'slug' => Str::slug($request->name),
             'description' => $request->description,
             'price' => $request->price,
             'stock' => $request->stock ?? 0,
-            'brand' => $request->brand,
             'sku' => $request->sku,
-            'thumbnail' => $request->thumbnail,
+            'thumbnail' => $this->uploadImage($request, 'thumbnail', 'products/thumbnails'),
             'video_url' => $request->video_url,
             'is_active' => true,
             'featured' => $request->featured ?? false,
         ]);
+
+        // Handle multiple image uploads (max 5 total)
+        if ($request->hasFile('images')) {
+            $sortOrder = 0;
+            foreach ($request->file('images') as $image) {
+                if ($sortOrder >= 5) break;
+                $imagePath = $image->store('products/images', 'public');
+                ProductImage::create([
+                    'product_id' => $product->id,
+                    'image_url' => $imagePath,
+                    'sort_order' => $sortOrder,
+                ]);
+                $sortOrder++;
+            }
+        }
+
+        $product->load('images');
 
         return response()->json([
             'message' => 'Product created successfully',
@@ -134,20 +175,87 @@ class ProductController extends Controller
     {
         $product = Product::findOrFail($id);
 
+        $request->validate([
+            'category_id' => 'nullable|exists:categories,id',
+            'brand_id' => 'nullable|exists:brands,id',
+            'name' => 'nullable|string|max:255',
+            'price' => 'nullable|numeric|min:0',
+            'stock' => 'nullable|integer|min:0',
+            'description' => 'nullable|string',
+            'sku' => 'nullable|string|unique:products,sku,' . $id,
+            'thumbnail' => 'nullable',
+            'remove_thumbnail' => 'nullable|boolean',
+            'video_url' => 'nullable|string',
+            'is_active' => 'nullable|boolean',
+            'featured' => 'nullable|boolean',
+            'images' => 'nullable|array',
+            'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'delete_image_ids' => 'nullable|array',
+            'delete_image_ids.*' => 'integer|exists:product_images,id',
+        ]);
+
         $product->update([
             'category_id' => $request->category_id ?? $product->category_id,
+            'brand_id' => $request->brand_id ?? $product->brand_id,
             'name' => $request->name ?? $product->name,
             'slug' => $request->name ? Str::slug($request->name) : $product->slug,
             'description' => $request->description ?? $product->description,
             'price' => $request->price ?? $product->price,
             'stock' => $request->stock ?? $product->stock,
-            'brand' => $request->brand ?? $product->brand,
             'sku' => $request->sku ?? $product->sku,
-            'thumbnail' => $request->thumbnail ?? $product->thumbnail,
             'video_url' => $request->video_url ?? $product->video_url,
             'is_active' => $request->is_active ?? $product->is_active,
             'featured' => $request->featured ?? $product->featured,
         ]);
+
+        // Update thumbnail if new file uploaded
+        if ($request->hasFile('thumbnail')) {
+            // Delete old thumbnail
+            if ($product->thumbnail) {
+                Storage::disk('public')->delete($product->thumbnail);
+            }
+            $product->update(['thumbnail' => $this->uploadImage($request, 'thumbnail', 'products/thumbnails')]);
+        }
+
+        // Remove thumbnail if requested
+        if ($request->boolean('remove_thumbnail') && $product->thumbnail) {
+            Storage::disk('public')->delete($product->thumbnail);
+            $product->update(['thumbnail' => null]);
+        }
+
+        // Delete specified images
+        if ($request->has('delete_image_ids')) {
+            $imagesToDelete = ProductImage::whereIn('id', $request->delete_image_ids)
+                ->where('product_id', $product->id)
+                ->get();
+            foreach ($imagesToDelete as $img) {
+                Storage::disk('public')->delete($img->image_url);
+                $img->delete();
+            }
+        }
+
+        // Count current images after deletion
+        $currentCount = $product->images()->count();
+        $maxNewImages = 5 - $currentCount;
+
+        // Handle new image uploads
+        if ($request->hasFile('images') && $maxNewImages > 0) {
+            $sortOrder = $currentCount;
+            $uploaded = 0;
+            foreach ($request->file('images') as $image) {
+                if ($uploaded >= $maxNewImages) break;
+                $imagePath = $image->store('products/images', 'public');
+                ProductImage::create([
+                    'product_id' => $product->id,
+                    'image_url' => $imagePath,
+                    'sort_order' => $sortOrder,
+                ]);
+                $sortOrder++;
+                $uploaded++;
+            }
+        }
+
+        $product->load('images');
 
         return response()->json([
             'message' => 'Product updated successfully',
@@ -161,10 +269,48 @@ class ProductController extends Controller
     public function destroy($id)
     {
         $product = Product::findOrFail($id);
+
+        // Delete thumbnail
+        if ($product->thumbnail) {
+            Storage::disk('public')->delete($product->thumbnail);
+        }
+
+        // Delete all product images from storage (cascade handles DB records)
+        foreach ($product->images as $image) {
+            Storage::disk('public')->delete($image->image_url);
+        }
+
         $product->delete();
 
         return response()->json([
             'message' => 'Product deleted successfully'
         ]);
+    }
+
+    // =========================
+    // DELETE SINGLE PRODUCT IMAGE (ADMIN)
+    // =========================
+    public function deleteImage($productId, $imageId)
+    {
+        $product = Product::findOrFail($productId);
+        $image = ProductImage::where('product_id', $product->id)->findOrFail($imageId);
+
+        Storage::disk('public')->delete($image->image_url);
+        $image->delete();
+
+        return response()->json([
+            'message' => 'Image deleted successfully'
+        ]);
+    }
+
+    // =========================
+    // UPLOAD SINGLE IMAGE (ADMIN)
+    // =========================
+    public function uploadImage(Request $request, string $fieldName, string $path): ?string
+    {
+        if ($request->hasFile($fieldName)) {
+            return $request->file($fieldName)->store($path, 'public');
+        }
+        return $request->input($fieldName); // fallback to string URL
     }
 }

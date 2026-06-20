@@ -24,7 +24,7 @@ class CartController extends Controller
     // Get cart identifier (user_id or session_id)
     private function getCartIdentifier(Request $request)
     {
-        $user = $request->user();
+        $user = auth('sanctum')->user();
 
         if ($user) {
             return ['user_id' => $user->id, 'session_id' => null];

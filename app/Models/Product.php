@@ -11,12 +11,12 @@ class Product extends Model
 
     protected $fillable = [
         'category_id',
+        'brand_id',
         'name',
         'slug',
         'description',
         'price',
         'stock',
-        'brand',
         'sku',
         'thumbnail',
         'video_url',
@@ -32,6 +32,11 @@ class Product extends Model
         return $this->belongsTo(Category::class);
     }
 
+    public function brand()
+    {
+        return $this->belongsTo(Brand::class);
+    }
+
     public function images()
     {
         return $this->hasMany(ProductImage::class);
@@ -45,6 +50,11 @@ class Product extends Model
     public function cart()
     {
         return $this->hasMany(Cart::class);
+    }
+
+    public function reviews()
+    {
+        return $this->hasMany(Review::class);
     }
 
     // =========================
@@ -65,4 +75,5 @@ class Product extends Model
             return 'Out of Stock';
         }
     }
+
 }

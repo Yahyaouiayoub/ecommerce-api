@@ -14,6 +14,8 @@ return new class extends Migration
             $table->decimal('amount', 10, 2);
             $table->string('category')->nullable();
             $table->text('note')->nullable();
+            $table->text('description')->nullable();
+            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $table->date('expense_date');
             $table->timestamps();
         });

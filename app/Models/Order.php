@@ -11,17 +11,18 @@ class Order extends Model
 
     protected $fillable = [
         'user_id',
+        'session_id',
         'order_number',
         'total_price',
         'status',
         'payment_method',
-        'shipping_address',
+        'address_id',
         'notes',
+        'guest_email',
+        'guest_name',
     ];
 
-    protected $casts = [
-        'shipping_address' => 'array',
-    ];
+    protected $casts = [];
 
     // =========================
     // RELATIONSHIPS
@@ -41,9 +42,19 @@ class Order extends Model
         return $this->hasOne(Payment::class);
     }
 
+    public function invoices()
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
     public function revenue()
     {
         return $this->hasOne(Revenue::class);
+    }
+
+    public function address()
+    {
+        return $this->belongsTo(Address::class);
     }
 
     // =========================

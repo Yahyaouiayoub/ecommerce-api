@@ -14,7 +14,9 @@ class Expense extends Model
         'amount',
         'category',
         'note',
+        'description',
         'expense_date',
+        'created_by',
     ];
 
     protected $casts = [
@@ -22,10 +24,23 @@ class Expense extends Model
     ];
 
     // =========================
-    // HELPERS
+    // RELATIONSHIPS
     // =========================
-    public function getAmountFormattedAttribute()
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    // =========================
+    // ACCESSORS
+    // =========================
+    public function getAmountFormattedAttribute(): string
     {
         return number_format($this->amount, 2) . ' MAD';
+    }
+
+    public function getCategoryLabelAttribute(): string
+    {
+        return $this->category ? ucfirst($this->category) : 'Uncategorized';
     }
 }

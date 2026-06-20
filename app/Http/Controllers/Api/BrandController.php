@@ -3,33 +3,33 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Category;
+use App\Models\Brand;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-class CategoryController extends Controller
+class BrandController extends Controller
 {
     // =========================
-    // GET ALL CATEGORIES
+    // GET ALL BRANDS
     // =========================
     public function index()
     {
-        $categories = Category::withCount('products')->get();
-        return response()->json($categories);
+        $brands = Brand::withCount('products')->get();
+        return response()->json($brands);
     }
 
     // =========================
-    // GET SINGLE CATEGORY
+    // GET SINGLE BRAND
     // =========================
     public function show($id)
     {
-        $category = Category::with('products')->findOrFail($id);
-        return response()->json($category);
+        $brand = Brand::with('products')->findOrFail($id);
+        return response()->json($brand);
     }
 
     // =========================
-    // CREATE CATEGORY (ADMIN)
+    // CREATE BRAND (ADMIN)
     // =========================
     public function store(Request $request)
     {
@@ -39,26 +39,26 @@ class CategoryController extends Controller
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
         ]);
 
-        $category = Category::create([
+        $brand = Brand::create([
             'name' => $request->name,
             'slug' => Str::slug($request->name),
             'description' => $request->description,
-            'image' => $this->uploadImage($request, 'image', 'categories'),
+            'image' => $this->uploadImage($request, 'image', 'brands'),
             'is_active' => true,
         ]);
 
         return response()->json([
-            'message' => 'Category created successfully',
-            'category' => $category
+            'message' => 'Brand created successfully',
+            'brand' => $brand
         ], 201);
     }
 
     // =========================
-    // UPDATE CATEGORY (ADMIN)
+    // UPDATE BRAND (ADMIN)
     // =========================
     public function update(Request $request, $id)
     {
-        $category = Category::findOrFail($id);
+        $brand = Brand::findOrFail($id);
 
         $request->validate([
             'name' => 'nullable|string|max:255',
@@ -69,50 +69,50 @@ class CategoryController extends Controller
         ]);
 
         $updateData = [
-            'name' => $request->name ?? $category->name,
-            'slug' => $request->name ? Str::slug($request->name) : $category->slug,
-            'description' => $request->description ?? $category->description,
-            'is_active' => $request->is_active ?? $category->is_active,
+            'name' => $request->name ?? $brand->name,
+            'slug' => $request->name ? Str::slug($request->name) : $brand->slug,
+            'description' => $request->description ?? $brand->description,
+            'is_active' => $request->is_active ?? $brand->is_active,
         ];
 
         // Update image if new file uploaded
         if ($request->hasFile('image')) {
-            if ($category->image) {
-                Storage::disk('public')->delete($category->image);
+            if ($brand->image) {
+                Storage::disk('public')->delete($brand->image);
             }
-            $updateData['image'] = $request->file('image')->store('categories', 'public');
+            $updateData['image'] = $request->file('image')->store('brands', 'public');
         }
 
         // Remove image if requested
-        if ($request->boolean('remove_image') && $category->image) {
-            Storage::disk('public')->delete($category->image);
+        if ($request->boolean('remove_image') && $brand->image) {
+            Storage::disk('public')->delete($brand->image);
             $updateData['image'] = null;
         }
 
-        $category->update($updateData);
+        $brand->update($updateData);
 
         return response()->json([
-            'message' => 'Category updated successfully',
-            'category' => $category
+            'message' => 'Brand updated successfully',
+            'brand' => $brand
         ]);
     }
 
     // =========================
-    // DELETE CATEGORY (ADMIN)
+    // DELETE BRAND (ADMIN)
     // =========================
     public function destroy($id)
     {
-        $category = Category::findOrFail($id);
+        $brand = Brand::findOrFail($id);
 
-        // Delete category image from storage
-        if ($category->image) {
-            Storage::disk('public')->delete($category->image);
+        // Delete brand image from storage
+        if ($brand->image) {
+            Storage::disk('public')->delete($brand->image);
         }
 
-        $category->delete();
+        $brand->delete();
 
         return response()->json([
-            'message' => 'Category deleted successfully'
+            'message' => 'Brand deleted successfully'
         ]);
     }
 

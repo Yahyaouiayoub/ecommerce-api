@@ -14,6 +14,13 @@ class Cart extends Model
         'session_id',
         'product_id',
         'quantity',
+        'status',
+    ];
+
+    protected $casts = [
+        'status' => 'string',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     // =========================
@@ -32,12 +39,26 @@ class Cart extends Model
     // =========================
     // SCOPES
     // =========================
-    public function scopeGetCart($query, $userId = null, $sessionId = null)
+    public function scopeActive($query)
+    {
+        return $query->where('status', 'active');
+    }
+
+    public function scopeAbandoned($query)
+    {
+        return $query->where('status', 'abandoned');
+    }
+
+    public function scopeConverted($query)
+    {
+        return $query->where('status', 'converted');
+    }
+
+    public function scopeOwnedBy($query, $userId = null, $sessionId = null)
     {
         if ($userId) {
             return $query->where('user_id', $userId);
         }
-
         return $query->where('session_id', $sessionId);
     }
 }

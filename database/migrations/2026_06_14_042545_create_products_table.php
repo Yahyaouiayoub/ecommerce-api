@@ -16,7 +16,7 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->decimal('price', 10, 2);
             $table->integer('stock')->default(0);
-            $table->string('brand')->nullable();
+            $table->foreignId('brand_id')->nullable()->constrained()->nullOnDelete();
             $table->string('sku')->unique()->nullable();
             $table->string('thumbnail')->nullable();
             $table->string('video_url')->nullable();

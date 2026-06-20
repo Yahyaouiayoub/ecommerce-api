@@ -11,9 +11,11 @@ return new class extends Migration
         Schema::create('payments', function (Blueprint $table) {
             $table->id();
             $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('invoice_id')->nullable()->constrained()->cascadeOnDelete();
             $table->decimal('amount', 10, 2);
             $table->string('currency')->default('MAD');
             $table->string('payment_method');
+            $table->string('payment_type', 20)->default('full');
             $table->string('transaction_id')->nullable();
             $table->enum('status', [
                 'pending',
