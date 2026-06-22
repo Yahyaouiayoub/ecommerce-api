@@ -41,6 +41,7 @@ class CartController extends Controller
         $identifier = $this->getCartIdentifier($request);
 
         $cart = Cart::with('product')
+            ->where('status', 'active')
             ->when($identifier['user_id'], function ($query) use ($identifier) {
                 return $query->where('user_id', $identifier['user_id']);
             })
@@ -75,6 +76,14 @@ class CartController extends Controller
             ], 400);
         }
 
+        $product = \App\Models\Product::findOrFail($request->product_id);
+
+        if ($product->stock === 0) {
+            return response()->json([
+                'message' => "{$product->name} is out of stock."
+            ], 422);
+        }
+
         $cart = Cart::where('product_id', $request->product_id)
             ->when($identifier['user_id'], function ($query) use ($identifier) {
                 return $query->where('user_id', $identifier['user_id']);
@@ -84,15 +93,26 @@ class CartController extends Controller
             })
             ->first();
 
+        $newQuantity = $request->quantity ?? 1;
         if ($cart) {
-            $cart->quantity += $request->quantity ?? 1;
+            $newQuantity = $cart->quantity + $newQuantity;
+        }
+
+        if ($newQuantity > $product->stock) {
+            return response()->json([
+                'message' => "Only {$product->stock} unit(s) of {$product->name} are available."
+            ], 422);
+        }
+
+        if ($cart) {
+            $cart->quantity = $newQuantity;
             $cart->save();
         } else {
             $cart = Cart::create([
                 'user_id' => $identifier['user_id'],
                 'session_id' => $identifier['session_id'],
                 'product_id' => $request->product_id,
-                'quantity' => $request->quantity ?? 1,
+                'quantity' => $newQuantity,
             ]);
         }
 
@@ -122,6 +142,14 @@ class CartController extends Controller
                 return $query->where('session_id', $identifier['session_id']);
             })
             ->firstOrFail();
+
+        $product = $cart->product;
+
+        if ($product && $request->quantity > $product->stock) {
+            return response()->json([
+                'message' => "Only {$product->stock} unit(s) of {$product->name} are available."
+            ], 422);
+        }
 
         $cart->update(['quantity' => $request->quantity]);
 

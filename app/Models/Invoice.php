@@ -19,6 +19,11 @@ class Invoice extends Model
         'status',
         'due_date',
         'notes',
+        'billing_name',
+        'billing_email',
+        'billing_phone',
+        'billing_address',
+        'payment_method',
         'issued_at',
         'paid_at',
     ];
@@ -58,7 +63,25 @@ class Invoice extends Model
             'unpaid'          => 'Unpaid',
             'partially_paid'  => 'Partially Paid',
             'paid'            => 'Paid',
+            'pending'         => 'Pending',
+            'failed'          => 'Failed',
+            'refunded'        => 'Refunded',
+            'cancelled'       => 'Cancelled',
             default           => ucfirst($this->status),
+        };
+    }
+
+    public function getStatusColorAttribute(): string
+    {
+        return match ($this->status) {
+            'unpaid'          => 'amber',
+            'partially_paid'  => 'blue',
+            'paid'            => 'emerald',
+            'pending'         => 'slate',
+            'failed'          => 'red',
+            'refunded'        => 'purple',
+            'cancelled'       => 'gray',
+            default           => 'gray',
         };
     }
 
@@ -78,28 +101,88 @@ class Invoice extends Model
     }
 
     // =========================
+    // SCOPES
+    // =========================
+    public function scopeByStatus($query, string $status)
+    {
+        return $query->where('status', $status);
+    }
+
+    public function scopeByPaymentMethod($query, ?string $method)
+    {
+        if ($method) {
+            return $query->where('payment_method', $method);
+        }
+        return $query;
+    }
+
+    public function scopeByDateRange($query, ?string $from, ?string $to)
+    {
+        if ($from) {
+            $query->whereDate('created_at', '>=', $from);
+        }
+        if ($to) {
+            $query->whereDate('created_at', '<=', $to);
+        }
+        return $query;
+    }
+
+    public function scopeSearch($query, ?string $search)
+    {
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('invoice_number', 'like', "%{$search}%")
+                  ->orWhereHas('order', function ($oq) use ($search) {
+                      $oq->where('order_number', 'like', "%{$search}%")
+                         ->orWhereHas('user', function ($uq) use ($search) {
+                             $uq->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%")
+                                ->orWhere('email', 'like', "%{$search}%");
+                         });
+                  });
+            });
+        }
+        return $query;
+    }
+
+    // =========================
     // HELPERS
     // =========================
     /**
      * Generate the next invoice number in sequence.
-     * Format: INV-YYYYMM-XXXX (e.g. INV-202606-0001)
+     * Uses settings for prefix and formatting.
      */
     public static function generateInvoiceNumber(): string
     {
-        $prefix = 'INV-' . now()->format('Ym') . '-';
+        $prefix = Setting::getValue('invoice_prefix', 'INV-');
+        $format = Setting::getValue('invoice_number_format', 'YEAR_MONTH_SEQ');
 
-        $lastInvoice = static::where('invoice_number', 'like', $prefix . '%')
+        $number = match ($format) {
+            'YEAR_MONTH_SEQ' => $prefix . now()->format('Ym') . '-' . self::nextSequence($prefix . now()->format('Ym') . '-'),
+            'YEAR_SEQ'       => $prefix . now()->format('Y') . '-' . self::nextSequence($prefix . now()->format('Y') . '-'),
+            'MONTH_SEQ'      => $prefix . now()->format('m') . '-' . self::nextSequence($prefix . now()->format('m') . '-'),
+            'SEQ'            => $prefix . self::nextSequence($prefix),
+            default          => $prefix . now()->format('Ym') . '-' . self::nextSequence($prefix . now()->format('Ym') . '-'),
+        };
+
+        return $number;
+    }
+
+    private static function nextSequence(string $pattern): string
+    {
+        $lastInvoice = static::where('invoice_number', 'like', $pattern . '%')
             ->orderBy('invoice_number', 'desc')
             ->first();
 
         if ($lastInvoice) {
-            $lastNumber = (int) Str::substr($lastInvoice->invoice_number, -4);
+            $parts = explode('-', $lastInvoice->invoice_number);
+            $lastNumber = (int) end($parts);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
         }
 
-        return $prefix . str_pad((string) $newNumber, 4, '0', STR_PAD_LEFT);
+        return str_pad((string) $newNumber, 4, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -107,6 +190,11 @@ class Invoice extends Model
      */
     public function recalculateStatus(): static
     {
+        // Don't auto-change if manually set to refunded/cancelled/failed/pending
+        if (in_array($this->status, ['refunded', 'cancelled', 'failed', 'pending'])) {
+            return $this;
+        }
+
         if ((float) $this->paid_amount <= 0) {
             $this->status = 'unpaid';
             $this->paid_at = null;
@@ -145,6 +233,47 @@ class Invoice extends Model
         return $payment;
     }
 
+    /**
+     * Mark this invoice as refunded.
+     */
+    public function markAsRefunded(): static
+    {
+        if ($this->status !== 'paid' && $this->status !== 'partially_paid') {
+            return $this;
+        }
+
+        $this->status = 'refunded';
+        $this->save();
+
+        return $this;
+    }
+
+    /**
+     * Mark this invoice as failed.
+     */
+    public function markAsFailed(): static
+    {
+        $this->status = 'failed';
+        $this->save();
+
+        return $this;
+    }
+
+    /**
+     * Mark this invoice as cancelled.
+     */
+    public function markAsCancelled(): static
+    {
+        if ($this->paid_amount > 0) {
+            return $this;
+        }
+
+        $this->status = 'cancelled';
+        $this->save();
+
+        return $this;
+    }
+
     public function isPaid(): bool
     {
         return $this->status === 'paid';
@@ -158,5 +287,40 @@ class Invoice extends Model
     public function isUnpaid(): bool
     {
         return $this->status === 'unpaid';
+    }
+
+    public function isPending(): bool
+    {
+        return $this->status === 'pending';
+    }
+
+    public function isRefunded(): bool
+    {
+        return $this->status === 'refunded';
+    }
+
+    public function isFailed(): bool
+    {
+        return $this->status === 'failed';
+    }
+
+    public function isCancelled(): bool
+    {
+        return $this->status === 'cancelled';
+    }
+
+    /**
+     * Build the billing address display string.
+     */
+    public function getBillingAddressDisplayAttribute(): string
+    {
+        $parts = [];
+
+        if ($this->billing_name) $parts[] = $this->billing_name;
+        if ($this->billing_address) $parts[] = $this->billing_address;
+        if ($this->billing_email) $parts[] = $this->billing_email;
+        if ($this->billing_phone) $parts[] = $this->billing_phone;
+
+        return implode("\n", $parts);
     }
 }

@@ -75,18 +75,70 @@ class OrderController extends Controller
     }
 
     // =========================
+    // CALCULATE ORDER TOTALS (consistent with frontend OrderSummary component)
+    // =========================
+    private function calculateOrderTotals(float $subtotal, ?int $shippingMethodId = null): array
+    {
+        $taxSettings = \App\Models\Setting::getTaxSettings();
+
+        // Calculate shipping from the selected method
+        $shipping = 0;
+        $shippingMethodName = null;
+        $shippingMethod = null;
+
+        if ($shippingMethodId) {
+            $shippingMethod = \App\Models\ShippingMethod::find($shippingMethodId);
+        }
+
+        // Fallback to default active shipping method
+        if (!$shippingMethod) {
+            $shippingMethod = \App\Models\ShippingMethod::getActive()->first();
+        }
+
+        if ($shippingMethod && $subtotal > 0) {
+            $shipping = $shippingMethod->getEffectiveCost($subtotal);
+            $shippingMethodName = $shippingMethod->name;
+        }
+
+        // Calculate tax
+        $tax = 0;
+        if ($taxSettings['enabled']) {
+            if ($taxSettings['type'] === 'percentage') {
+                $tax = round($subtotal * ($taxSettings['rate'] / 100), 2);
+            } else {
+                // Fixed amount
+                $tax = round($taxSettings['rate'], 2);
+            }
+        }
+
+        $total = round($subtotal + $shipping + $tax, 2);
+
+        return [
+            'subtotal' => $subtotal,
+            'shipping' => $shipping,
+            'tax' => $tax,
+            'total' => $total,
+            'shipping_method_name' => $shippingMethodName,
+        ];
+    }
+
+    // =========================
     // CREATE ORDER (CHECKOUT)
     // =========================
     public function store(Request $request)
     {
         $user = auth('sanctum')->user();
 
+        $request->validate([
+            'payment_method' => 'required|in:cod,card',
+            'shipping_method_id' => 'sometimes|nullable|integer|exists:shipping_methods,id',
+            'notes' => 'nullable|string',
+        ]);
+
         if ($user) {
             // Authenticated user checkout
             $request->validate([
-                'payment_method' => 'required|in:cod,card',
                 'address_id' => 'required|integer|exists:addresses,id',
-                'notes' => 'nullable|string',
             ]);
 
             // Verify the address belongs to the user
@@ -94,9 +146,6 @@ class OrderController extends Controller
         } else {
             // Guest checkout
             $request->validate([
-                'payment_method' => 'required|in:cod,card',
-                'notes' => 'nullable|string',
-                // Guest shipping info
                 'guest_name' => 'required|string|max:255',
                 'guest_email' => 'required|email|max:255',
                 'guest_phone' => 'nullable|string|max:20',
@@ -118,8 +167,8 @@ class OrderController extends Controller
             ], 422);
         }
 
-        // Check stock and calculate total
-        $total = 0;
+        // Check stock and calculate subtotal
+        $subtotal = 0;
         $orderItems = [];
 
         foreach ($cartItems as $item) {
@@ -133,13 +182,16 @@ class OrderController extends Controller
                 ], 422);
             }
 
-            $total += $product->price * $item->quantity;
+            $subtotal += $product->price * $item->quantity;
             $orderItems[] = [
                 'product_id' => $product->id,
                 'quantity' => $item->quantity,
                 'price' => $product->price,
             ];
         }
+
+        // Calculate full totals (subtotal + shipping + tax) consistent with frontend
+        $totals = $this->calculateOrderTotals($subtotal, $request->shipping_method_id);
 
         $identifier = $this->getCartIdentifier($request);
 
@@ -150,9 +202,10 @@ class OrderController extends Controller
                 'user_id' => $user ? $user->id : null,
                 'session_id' => $identifier['session_id'],
                 'order_number' => 'ORD-' . time() . '-' . strtoupper(substr(uniqid(), -4)),
-                'total_price' => $total,
+                'total_price' => $totals['total'],
                 'status' => 'pending',
                 'payment_method' => $request->payment_method,
+                'shipping_method_id' => $request->shipping_method_id,
                 'notes' => $request->notes,
             ];
 
@@ -201,8 +254,8 @@ class OrderController extends Controller
             $invoice = \App\Models\Invoice::create([
                 'order_id'       => $order->id,
                 'invoice_number' => \App\Models\Invoice::generateInvoiceNumber(),
-                'total_amount'   => $total,
-                'paid_amount'    => $request->payment_method === 'card' ? $total : 0,
+                'total_amount'   => $totals['total'],
+                'paid_amount'    => $request->payment_method === 'card' ? $totals['total'] : 0,
                 'status'         => $request->payment_method === 'card' ? 'paid' : 'unpaid',
                 'issued_at'      => now(),
                 'paid_at'        => $request->payment_method === 'card' ? now() : null,
@@ -212,7 +265,7 @@ class OrderController extends Controller
                 Payment::create([
                     'order_id'       => $order->id,
                     'invoice_id'     => $invoice->id,
-                    'amount'         => $total,
+                    'amount'         => $totals['total'],
                     'currency'       => 'MAD',
                     'payment_method' => 'card',
                     'payment_type'   => 'full',

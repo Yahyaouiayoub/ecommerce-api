@@ -111,6 +111,21 @@ class DashboardController extends Controller
         $abandonedCarts = Cart::where('status', 'abandoned')->count();
         $convertedCarts = Cart::where('status', 'converted')->count();
 
+        // =========================
+        // INVOICE STATISTICS
+        // =========================
+        $totalInvoices = Invoice::count();
+        $paidInvoices = Invoice::where('status', 'paid')->count();
+        $pendingInvoices = Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending'])->count();
+        $refundedInvoices = Invoice::where('status', 'refunded')->count();
+        $failedInvoices = Invoice::where('status', 'failed')->count();
+        $cancelledInvoices = Invoice::where('status', 'cancelled')->count();
+        $totalPendingAmount = (float) Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending'])
+            ->get()
+            ->sum(function ($inv) {
+                return $inv->remaining_amount;
+            });
+
         $stats = [
             // Revenue analytics (from paid invoices)
             'total_revenue' => $totalRevenue,
@@ -141,6 +156,15 @@ class DashboardController extends Controller
             'active_carts' => $activeCarts,
             'abandoned_carts' => $abandonedCarts,
             'converted_carts' => $convertedCarts,
+
+            // Invoice statistics
+            'total_invoices' => $totalInvoices,
+            'paid_invoices' => $paidInvoices,
+            'pending_invoices' => $pendingInvoices,
+            'refunded_invoices' => $refundedInvoices,
+            'failed_invoices' => $failedInvoices,
+            'cancelled_invoices' => $cancelledInvoices,
+            'total_pending_amount' => $totalPendingAmount,
 
             // Legacy revenue fields (backward compat)
             'total_expenses' => $totalExpenses,
@@ -214,15 +238,15 @@ class DashboardController extends Controller
         // 3. Net Profit — Revenue - Expenses
         $netProfit = $totalRevenue - $totalExpenses;
 
-        // 4. Pending Payments — sum of remaining_amount from unpaid/partial invoices
-        $pendingPayments = (float) Invoice::whereIn('status', ['unpaid', 'partially_paid'])
+        // 4. Pending Payments — sum of remaining_amount from unpaid/partial/pending/failed invoices
+        $pendingPayments = (float) Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending', 'failed'])
             ->get()
             ->sum(function ($inv) {
                 return $inv->remaining_amount;
             });
 
         // 5. Unpaid Invoices — count of invoices not fully paid
-        $unpaidInvoicesCount = Invoice::whereIn('status', ['unpaid', 'partially_paid'])->count();
+        $unpaidInvoicesCount = Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending', 'failed'])->count();
 
         // =========================
         // CHARTS — Revenue vs Expenses (last 12 months)

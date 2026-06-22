@@ -18,7 +18,8 @@ class ProductController extends Controller
     {
         $query = Product::with('category', 'brand', 'images')
             ->withAvg('reviews', 'rating')
-            ->withCount('reviews');
+            ->withCount('reviews')
+            ->where('stock', '>', 0);
 
         // Filter by category
         if ($request->has('category_id')) {
@@ -28,6 +29,16 @@ class ProductController extends Controller
         // Filter by brand
         if ($request->has('brand_id')) {
             $query->where('brand_id', $request->brand_id);
+        }
+
+        // Filter by new arrivals (products created within the last 30 days)
+        if ($request->boolean('new_arrivals')) {
+            $query->where('created_at', '>=', now()->subDays(30));
+        }
+
+        // Filter by best sellers (products that have been ordered)
+        if ($request->boolean('best_sellers')) {
+            $query->whereHas('orderItems');
         }
 
         // Filter by search (name, category name, brand name, SKU)
@@ -69,6 +80,10 @@ class ProductController extends Controller
                 case 'name_desc':
                     $query->orderBy('name', 'desc');
                     break;
+                case 'popular':
+                    // Sort by number of reviews (descending) as a popularity metric
+                    $query->withCount('reviews')->orderBy('reviews_count', 'desc');
+                    break;
                 default:
                     $query->latest();
             }
@@ -84,6 +99,40 @@ class ProductController extends Controller
     }
 
     // =========================
+    // GET PRODUCT PRICE RANGE
+    // =========================
+    public function priceRange()
+    {
+        $min = Product::where('stock', '>', 0)->min('price');
+        $max = Product::where('stock', '>', 0)->max('price');
+
+        return response()->json([
+            'min_price' => (float) $min,
+            'max_price' => (float) $max,
+        ]);
+    }
+
+    // =========================
+    // GET BEST SELLERS (top products by order count)
+    // =========================
+    public function bestSellers()
+    {
+        $products = Product::with('category', 'brand', 'images')
+            ->withAvg('reviews', 'rating')
+            ->withCount(['reviews', 'orderItems as total_sold' => function ($q) {
+                $q->select(\Illuminate\Support\Facades\DB::raw('COALESCE(SUM(quantity), 0)'));
+            }])
+            ->where('is_active', true)
+            ->where('stock', '>', 0)
+            ->having('total_sold', '>', 0)
+            ->orderBy('total_sold', 'desc')
+            ->limit(8)
+            ->get();
+
+        return response()->json($products);
+    }
+
+    // =========================
     // GET FEATURED PRODUCTS
     // =========================
     public function featured()
@@ -93,6 +142,7 @@ class ProductController extends Controller
             ->withCount('reviews')
             ->where('is_active', true)
             ->where('featured', true)
+            ->where('stock', '>', 0)
             ->limit(8)
             ->get();
 

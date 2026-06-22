@@ -17,8 +17,12 @@ class PaymentController extends Controller
     // =========================
     private const PAYMENT_TYPES = [
         'full'       => 1.0,   // 100%
-        'partial_50' => 0.5,   // 50%
+        'partial_20' => 0.2,   // 20%
         'partial_30' => 0.3,   // 30%
+        'partial_50' => 0.5,   // 50%
+        'partial_60' => 0.6,   // 60%
+        'partial_70' => 0.7,   // 70%
+        'partial_80' => 0.8,   // 80%
         'custom'     => null,  // user-defined
     ];
 
@@ -27,13 +31,12 @@ class PaymentController extends Controller
      */
     private function calculateAmount(string $type, float $remaining, ?float $customAmount = null): float
     {
-        return match ($type) {
-            'full'       => $remaining,
-            'partial_50' => round($remaining * 0.5, 2),
-            'partial_30' => round($remaining * 0.3, 2),
-            'custom'     => $customAmount ?? $remaining,
-            default      => $remaining,
-        };
+        if ($type === 'custom') {
+            return $customAmount ?? $remaining;
+        }
+
+        $percentage = self::PAYMENT_TYPES[$type] ?? 1.0;
+        return round($remaining * $percentage, 2);
     }
 
     // =========================
@@ -43,7 +46,7 @@ class PaymentController extends Controller
     {
         $request->validate([
             'invoice_id' => 'required|exists:invoices,id',
-            'payment_type' => 'required|in:full,partial_50,partial_30,custom',
+            'payment_type' => 'required|in:full,partial_20,partial_30,partial_50,partial_60,partial_70,partial_80,custom',
             'amount' => 'nullable|numeric|min:0.01', // required for custom
         ]);
 
@@ -204,15 +207,35 @@ class PaymentController extends Controller
                 'amount' => $remaining,
                 'amount_formatted' => number_format($remaining, 2) . ' MAD',
             ],
-            'partial_50' => [
-                'label' => 'Partial Payment (50%)',
-                'amount' => round($remaining * 0.5, 2),
-                'amount_formatted' => number_format(round($remaining * 0.5, 2), 2) . ' MAD',
+            'partial_20' => [
+                'label' => 'Partial Payment (20%)',
+                'amount' => round($remaining * 0.2, 2),
+                'amount_formatted' => number_format(round($remaining * 0.2, 2), 2) . ' MAD',
             ],
             'partial_30' => [
                 'label' => 'Partial Payment (30%)',
                 'amount' => round($remaining * 0.3, 2),
                 'amount_formatted' => number_format(round($remaining * 0.3, 2), 2) . ' MAD',
+            ],
+            'partial_50' => [
+                'label' => 'Partial Payment (50%)',
+                'amount' => round($remaining * 0.5, 2),
+                'amount_formatted' => number_format(round($remaining * 0.5, 2), 2) . ' MAD',
+            ],
+            'partial_60' => [
+                'label' => 'Partial Payment (60%)',
+                'amount' => round($remaining * 0.6, 2),
+                'amount_formatted' => number_format(round($remaining * 0.6, 2), 2) . ' MAD',
+            ],
+            'partial_70' => [
+                'label' => 'Partial Payment (70%)',
+                'amount' => round($remaining * 0.7, 2),
+                'amount_formatted' => number_format(round($remaining * 0.7, 2), 2) . ' MAD',
+            ],
+            'partial_80' => [
+                'label' => 'Partial Payment (80%)',
+                'amount' => round($remaining * 0.8, 2),
+                'amount_formatted' => number_format(round($remaining * 0.8, 2), 2) . ' MAD',
             ],
             'custom' => [
                 'label' => 'Custom Amount',
