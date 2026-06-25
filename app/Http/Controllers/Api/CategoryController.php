@@ -35,12 +35,20 @@ class CategoryController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:255',
+            'name_en' => 'nullable|string|max:255',
+            'name_fr' => 'nullable|string|max:255',
+            'name_ar' => 'nullable|string|max:255',
+            'name_es' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
         ]);
 
         $category = Category::create([
             'name' => $request->name,
+            'name_en' => $request->name_en,
+            'name_fr' => $request->name_fr,
+            'name_ar' => $request->name_ar,
+            'name_es' => $request->name_es,
             'slug' => Str::slug($request->name),
             'description' => $request->description,
             'image' => $this->uploadImage($request, 'image', 'categories'),
@@ -62,6 +70,10 @@ class CategoryController extends Controller
 
         $request->validate([
             'name' => 'nullable|string|max:255',
+            'name_en' => 'nullable|string|max:255',
+            'name_fr' => 'nullable|string|max:255',
+            'name_ar' => 'nullable|string|max:255',
+            'name_es' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
             'remove_image' => 'nullable|boolean',
@@ -70,6 +82,10 @@ class CategoryController extends Controller
 
         $updateData = [
             'name' => $request->name ?? $category->name,
+            'name_en' => $request->name_en ?? $category->name_en,
+            'name_fr' => $request->name_fr ?? $category->name_fr,
+            'name_ar' => $request->name_ar ?? $category->name_ar,
+            'name_es' => $request->name_es ?? $category->name_es,
             'slug' => $request->name ? Str::slug($request->name) : $category->slug,
             'description' => $request->description ?? $category->description,
             'is_active' => $request->is_active ?? $category->is_active,

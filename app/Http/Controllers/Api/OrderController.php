@@ -415,30 +415,7 @@ class OrderController extends Controller
         $order->update(['status' => $newStatus]);
 
         if ($newStatus === 'delivered') {
-            // For card payments, mark the payment as paid
-            if ($order->payment_method === 'card') {
-                $order->payment()->update([
-                    'status' => 'paid',
-                    'paid_at' => now(),
-                ]);
-            }
-
-            // Mark any unpaid/partially paid invoices as fully paid
-            $order->invoices()->where('status', '!=', 'paid')->each(function ($inv) {
-                $remaining = $inv->remaining_amount;
-                if ($remaining > 0) {
-                    $inv->registerPayment(
-                        amount: $remaining,
-                        paymentMethod: 'cod',
-                        paymentType: 'full'
-                    );
-                } else {
-                    $inv->paid_amount = $inv->total_amount;
-                    $inv->recalculateStatus()->save();
-                }
-            });
-
-            // Create revenue record
+            // Create revenue record (order delivered generates revenue)
             Revenue::firstOrCreate(
                 ['order_id' => $order->id],
                 [
@@ -449,6 +426,14 @@ class OrderController extends Controller
                     'revenue_date' => now(),
                 ]
             );
+        }
+
+        // For card payments, mark the payment as paid
+        if ($newStatus === 'delivered' && $order->payment_method === 'card') {
+            $order->payment()->update([
+                'status' => 'paid',
+                'paid_at' => now(),
+            ]);
         }
 
         // If cancelled, restore stock

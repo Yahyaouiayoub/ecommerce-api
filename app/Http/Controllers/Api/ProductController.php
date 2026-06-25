@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Expense;
 use App\Models\Product;
 use App\Models\ProductImage;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -171,6 +173,9 @@ class ProductController extends Controller
             'brand_id' => 'nullable|exists:brands,id',
             'name' => 'required|string|max:255',
             'price' => 'required|numeric|min:0',
+            'purchase_price' => 'nullable|numeric|min:0',
+            'margin_percentage' => 'nullable|numeric|min:0|max:1000',
+            'discount_price' => 'nullable|numeric|min:0',
             'stock' => 'nullable|integer|min:0',
             'description' => 'nullable|string',
             'sku' => 'nullable|string|unique:products',
@@ -180,6 +185,31 @@ class ProductController extends Controller
             'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
         ]);
 
+        $purchasePrice = (float) ($request->purchase_price ?? 0);
+        $marginPercentage = (float) ($request->margin_percentage ?? 0);
+        $finalPrice = Product::calculateFinalPrice($purchasePrice, $marginPercentage);
+
+        // Discount validation: block if discount_price < purchase_price
+        if ($request->has('discount_price') && $request->discount_price !== null && $request->discount_price !== '') {
+            $discountPrice = (float) $request->discount_price;
+            if ($marginPercentage <= 0) {
+                return response()->json([
+                    'message' => 'Validation failed.',
+                    'errors' => [
+                        'discount_price' => ['Cannot set a discount when margin is zero or negative. Ensure margin_percentage > 0 first.'],
+                    ],
+                ], 422);
+            }
+            if ($discountPrice < $purchasePrice) {
+                return response()->json([
+                    'message' => 'Validation failed.',
+                    'errors' => [
+                        'discount_price' => ['Discount would cause loss! Discount price cannot be less than purchase price.'],
+                    ],
+                ], 422);
+            }
+        }
+
         $product = Product::create([
             'category_id' => $request->category_id,
             'brand_id' => $request->brand_id,
@@ -187,6 +217,10 @@ class ProductController extends Controller
             'slug' => Str::slug($request->name),
             'description' => $request->description,
             'price' => $request->price,
+            'purchase_price' => $purchasePrice,
+            'margin_percentage' => $marginPercentage,
+            'final_price' => $finalPrice,
+            'discount_price' => $request->discount_price !== '' ? ($request->discount_price ?? null) : null,
             'stock' => $request->stock ?? 0,
             'sku' => $request->sku,
             'thumbnail' => $this->uploadImage($request, 'thumbnail', 'products/thumbnails'),
@@ -194,6 +228,21 @@ class ProductController extends Controller
             'is_active' => true,
             'featured' => $request->featured ?? false,
         ]);
+
+        // Auto-create expense for stock purchase
+        if ($purchasePrice > 0 && ($request->stock ?? 0) > 0) {
+            Expense::create([
+                'product_id'  => $product->id,
+                'title'       => "Product purchase: {$product->name}",
+                'amount'      => $purchasePrice * ($request->stock ?? 0),
+                'total_cost'  => $purchasePrice * ($request->stock ?? 0),
+                'quantity'    => $request->stock ?? 0,
+                'category'    => 'products',
+                'note'        => "Auto-created from product creation (stock: {$request->stock}, unit cost: {$purchasePrice} MAD)",
+                'expense_date' => now()->toDateString(),
+                'created_by'  => $request->user()->id,
+            ]);
+        }
 
         // Handle multiple image uploads (max 5 total)
         if ($request->hasFile('images')) {
@@ -230,6 +279,9 @@ class ProductController extends Controller
             'brand_id' => 'nullable|exists:brands,id',
             'name' => 'nullable|string|max:255',
             'price' => 'nullable|numeric|min:0',
+            'purchase_price' => 'nullable|numeric|min:0',
+            'margin_percentage' => 'nullable|numeric|min:0|max:1000',
+            'discount_price' => 'nullable|numeric|min:0',
             'stock' => 'nullable|integer|min:0',
             'description' => 'nullable|string',
             'sku' => 'nullable|string|unique:products,sku,' . $id,
@@ -244,6 +296,36 @@ class ProductController extends Controller
             'delete_image_ids.*' => 'integer|exists:product_images,id',
         ]);
 
+        // Capture old stock before update for expense tracking
+        $oldStock = $product->stock;
+
+        // Calculate new final_price if purchase_price or margin_percentage changed
+        $purchasePrice = $request->has('purchase_price') ? (float) $request->purchase_price : (float) $product->purchase_price;
+        $marginPercentage = $request->has('margin_percentage') ? (float) $request->margin_percentage : (float) $product->margin_percentage;
+        $finalPrice = Product::calculateFinalPrice($purchasePrice, $marginPercentage);
+
+        // Discount validation
+        $discountPrice = $request->has('discount_price') ? $request->discount_price : $product->discount_price;
+        if ($discountPrice !== null && $discountPrice !== '' && (float) $discountPrice > 0) {
+            $discountPriceVal = (float) $discountPrice;
+            if ($marginPercentage <= 0) {
+                return response()->json([
+                    'message' => 'Validation failed.',
+                    'errors' => [
+                        'discount_price' => ['Cannot set a discount when margin is zero or negative. Ensure margin_percentage > 0 first.'],
+                    ],
+                ], 422);
+            }
+            if ($discountPriceVal < $purchasePrice) {
+                return response()->json([
+                    'message' => 'Validation failed.',
+                    'errors' => [
+                        'discount_price' => ['Discount would cause loss! Discount price cannot be less than purchase price.'],
+                    ],
+                ], 422);
+            }
+        }
+
         $product->update([
             'category_id' => $request->category_id ?? $product->category_id,
             'brand_id' => $request->brand_id ?? $product->brand_id,
@@ -251,6 +333,10 @@ class ProductController extends Controller
             'slug' => $request->name ? Str::slug($request->name) : $product->slug,
             'description' => $request->description ?? $product->description,
             'price' => $request->price ?? $product->price,
+            'purchase_price' => $request->has('purchase_price') ? $purchasePrice : $product->purchase_price,
+            'margin_percentage' => $request->has('margin_percentage') ? $marginPercentage : $product->margin_percentage,
+            'final_price' => $finalPrice,
+            'discount_price' => $request->has('discount_price') ? ($request->discount_price !== '' ? (float) $request->discount_price : null) : $product->discount_price,
             'stock' => $request->stock ?? $product->stock,
             'sku' => $request->sku ?? $product->sku,
             'video_url' => $request->video_url ?? $product->video_url,
@@ -303,6 +389,23 @@ class ProductController extends Controller
                 $sortOrder++;
                 $uploaded++;
             }
+        }
+
+        // Auto-create expense if stock was increased
+        $newStock = $request->stock ?? $product->stock;
+        $stockIncrease = $newStock - $oldStock;
+        if ($purchasePrice > 0 && $stockIncrease > 0) {
+            Expense::create([
+                'product_id'  => $product->id,
+                'title'       => "Stock purchase: {$product->name}",
+                'amount'      => $purchasePrice * $stockIncrease,
+                'total_cost'  => $purchasePrice * $stockIncrease,
+                'quantity'    => $stockIncrease,
+                'category'    => 'products',
+                'note'        => "Auto-created from stock increase (+{$stockIncrease} units, unit cost: {$purchasePrice} MAD)",
+                'expense_date' => now()->toDateString(),
+                'created_by'  => $request->user()->id,
+            ]);
         }
 
         $product->load('images');

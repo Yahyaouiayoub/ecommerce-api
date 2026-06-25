@@ -26,10 +26,33 @@ class Setting extends Model
      */
     public static function setValue(string $key, mixed $value): void
     {
+        // Determine group from key prefix so getGrouped() lookups still work
+        $group = self::inferGroup($key);
+
         static::updateOrCreate(
             ['key' => $key],
-            ['value' => $value]
+            ['value' => $value, 'group' => $group]
         );
+    }
+
+    /**
+     * Infer a settings group from the key name.
+     */
+    private static function inferGroup(string $key): ?string
+    {
+        if (str_starts_with($key, 'shipping_') || str_starts_with($key, 'free_shipping_') || str_starts_with($key, 'standard_shipping_')) {
+            return 'shipping';
+        }
+        if (str_starts_with($key, 'tax_')) {
+            return 'tax';
+        }
+        if (str_starts_with($key, 'invoice_') || str_starts_with($key, 'company_')) {
+            return 'invoice';
+        }
+        if (str_starts_with($key, 'logo_')) {
+            return 'general';
+        }
+        return null;
     }
 
     /**

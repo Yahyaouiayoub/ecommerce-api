@@ -6,20 +6,57 @@ use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\OrderItem;
 use App\Models\User;
 use App\Models\Revenue;
 use App\Models\Cart;
 use App\Models\Expense;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
     /**
+     * Cache TTL in seconds.
+     * Stats are cached for 5 minutes, financial data for 10 minutes.
+     */
+    private const STATS_CACHE_TTL = 300;
+    private const FINANCIAL_CACHE_TTL = 600;
+
+    /**
+     * Build a time-bucketed cache key so all users share the same cache entry
+     * within each 5-minute window.
+     */
+    private function cacheKey(string $prefix, int $ttl = 300): string
+    {
+        $bucket = now()->timestamp - (now()->timestamp % $ttl);
+        return "dashboard:{$prefix}:{$bucket}";
+    }
+
+    /**
      * Get dashboard statistics for admin.
      * Revenue is calculated from paid invoices only (completed/paid sales).
+     *
+     * Results are cached for 5 minutes to absorb repeated requests
+     * from auto-polling and multiple admin users.
      */
     public function stats()
+    {
+        $data = Cache::remember(
+            $this->cacheKey('stats', self::STATS_CACHE_TTL),
+            self::STATS_CACHE_TTL,
+            fn() => $this->computeStats()
+        );
+
+        return response()->json($data);
+    }
+
+    /**
+     * Compute all dashboard stats from the database.
+     * Extracted so the work can be cached independently.
+     */
+    private function computeStats(): array
     {
         $now = now();
         $startOfMonth = $now->copy()->startOfMonth();
@@ -52,13 +89,11 @@ class DashboardController extends Controller
             ->orderBy('year', 'asc')
             ->orderBy('month', 'asc')
             ->get()
-            ->map(function ($item) {
-                return [
-                    'year' => (int) $item->year,
-                    'month' => (int) $item->month,
-                    'total' => (float) $item->total,
-                ];
-            });
+            ->map(fn($item) => [
+                'year' => (int) $item->year,
+                'month' => (int) $item->month,
+                'total' => (float) $item->total,
+            ]);
 
         // Fill in missing months with zero values
         $revenueByMonth = $this->fillMissingMonths($revenueByMonth, 12);
@@ -81,18 +116,16 @@ class DashboardController extends Controller
             ->orderBy('year', 'asc')
             ->orderBy('month', 'asc')
             ->get()
-            ->map(function ($item) {
-                return [
-                    'year' => (int) $item->year,
-                    'month' => (int) $item->month,
-                    'total' => (int) $item->total,
-                    'delivered' => (int) $item->delivered,
-                    'pending' => (int) $item->pending,
-                    'cancelled' => (int) $item->cancelled,
-                    'processing' => (int) $item->processing,
-                    'shipped' => (int) $item->shipped,
-                ];
-            });
+            ->map(fn($item) => [
+                'year' => (int) $item->year,
+                'month' => (int) $item->month,
+                'total' => (int) $item->total,
+                'delivered' => (int) $item->delivered,
+                'pending' => (int) $item->pending,
+                'cancelled' => (int) $item->cancelled,
+                'processing' => (int) $item->processing,
+                'shipped' => (int) $item->shipped,
+            ]);
 
         // Fill in missing months with zero values
         $ordersByMonth = $this->fillMissingMonths($ordersByMonth, 12, true);
@@ -122,11 +155,9 @@ class DashboardController extends Controller
         $cancelledInvoices = Invoice::where('status', 'cancelled')->count();
         $totalPendingAmount = (float) Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending'])
             ->get()
-            ->sum(function ($inv) {
-                return $inv->remaining_amount;
-            });
+            ->sum(fn($inv) => $inv->remaining_amount);
 
-        $stats = [
+        return [
             // Revenue analytics (from paid invoices)
             'total_revenue' => $totalRevenue,
             'revenue_this_month' => $revenueThisMonth,
@@ -182,19 +213,15 @@ class DashboardController extends Controller
                 ->latest()
                 ->take(5)
                 ->get()
-                ->map(function ($order) {
-                    return [
-                        'id' => $order->id,
-                        'order_number' => $order->order_number,
-                        'customer' => $order->user?->full_name ?? 'N/A',
-                        'total_price' => (float) $order->total_price,
-                        'status' => $order->status,
-                        'created_at' => $order->created_at,
-                    ];
-                }),
+                ->map(fn($order) => [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'customer' => $order->user?->full_name ?? 'N/A',
+                    'total_price' => (float) $order->total_price,
+                    'status' => $order->status,
+                    'created_at' => $order->created_at,
+                ]),
         ];
-
-        return response()->json($stats);
     }
 
     /**
@@ -220,8 +247,81 @@ class DashboardController extends Controller
     /**
      * Get comprehensive financial dashboard data.
      * All metrics are calculated from real database records.
+     *
+     * Results are cached for 10 minutes since financial data changes infrequently.
      */
     public function financial()
+    {
+        $data = Cache::remember(
+            $this->cacheKey('financial', self::FINANCIAL_CACHE_TTL),
+            self::FINANCIAL_CACHE_TTL,
+            fn() => $this->computeFinancial()
+        );
+
+        return response()->json($data);
+    }
+
+    /**
+     * Get per-product profit breakdown.
+     * Shows each product's purchase cost, units sold, total revenue, total cost, profit, and margin.
+     */
+    public function productProfits()
+    {
+        $products = Product::where('is_active', true)->get();
+
+        $results = [];
+        foreach ($products as $product) {
+            // Total units sold from delivered orders only
+            $soldData = OrderItem::where('product_id', $product->id)
+                ->whereHas('order', function ($q) {
+                    $q->whereIn('status', ['delivered', 'shipped']);
+                })
+                ->selectRaw('COALESCE(SUM(quantity), 0) as total_sold')
+                ->selectRaw('COALESCE(SUM(quantity * price), 0) as total_revenue')
+                ->first();
+
+            $totalSold = (int) $soldData->total_sold;
+            $totalRevenue = (float) $soldData->total_revenue;
+            $purchasePrice = (float) ($product->purchase_price ?: 0);
+            $totalCost = round($purchasePrice * $totalSold, 2);
+            $profit = round($totalRevenue - $totalCost, 2);
+            $margin = $totalRevenue > 0 ? round(($profit / $totalRevenue) * 100, 1) : 0;
+
+            // Skip products with zero sales or zero purchase price (not relevant)
+            if ($totalSold === 0) continue;
+
+            $results[] = [
+                'id'                => $product->id,
+                'name'              => $product->name,
+                'purchase_price'    => $purchasePrice,
+                'selling_price'     => (float) $product->getEffectivePrice(),
+                'total_sold'        => $totalSold,
+                'total_revenue'     => $totalRevenue,
+                'total_cost'        => $totalCost,
+                'profit'            => $profit,
+                'margin_percentage' => $margin,
+            ];
+        }
+
+        // Sort by profit descending
+        usort($results, fn($a, $b) => $b['profit'] <=> $a['profit']);
+
+        return response()->json([
+            'data'        => $results,
+            'total_count' => count($results),
+            'summary'     => [
+                'total_revenue' => round(array_sum(array_column($results, 'total_revenue')), 2),
+                'total_cost'    => round(array_sum(array_column($results, 'total_cost')), 2),
+                'total_profit'  => round(array_sum(array_column($results, 'profit')), 2),
+            ],
+        ]);
+    }
+
+    /**
+     * Compute all financial dashboard data from the database.
+     * Extracted so the work can be cached independently.
+     */
+    private function computeFinancial(): array
     {
         $now = now();
 
@@ -241,9 +341,7 @@ class DashboardController extends Controller
         // 4. Pending Payments — sum of remaining_amount from unpaid/partial/pending/failed invoices
         $pendingPayments = (float) Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending', 'failed'])
             ->get()
-            ->sum(function ($inv) {
-                return $inv->remaining_amount;
-            });
+            ->sum(fn($inv) => $inv->remaining_amount);
 
         // 5. Unpaid Invoices — count of invoices not fully paid
         $unpaidInvoicesCount = Invoice::whereIn('status', ['unpaid', 'partially_paid', 'pending', 'failed'])->count();
@@ -266,9 +364,7 @@ class DashboardController extends Controller
             ->orderBy('year', 'asc')
             ->orderBy('month', 'asc')
             ->get()
-            ->keyBy(function ($item) {
-                return $item->year . '-' . $item->month;
-            });
+            ->keyBy(fn($item) => $item->year . '-' . $item->month);
 
         // Expenses by month
         $expensesByMonth = Expense::where('expense_date', '>=', $startDate)
@@ -281,9 +377,7 @@ class DashboardController extends Controller
             ->orderBy('year', 'asc')
             ->orderBy('month', 'asc')
             ->get()
-            ->keyBy(function ($item) {
-                return $item->year . '-' . $item->month;
-            });
+            ->keyBy(fn($item) => $item->year . '-' . $item->month);
 
         // Build combined 12-month array
         $revenueVsExpenses = [];
@@ -327,7 +421,7 @@ class DashboardController extends Controller
             'rate'           => $collectionRate,
         ];
 
-        return response()->json([
+        return [
             // Cards
             'total_revenue'     => $totalRevenue,
             'total_expenses'    => $totalExpenses,
@@ -339,13 +433,13 @@ class DashboardController extends Controller
             'revenue_vs_expenses' => $revenueVsExpenses,
             'monthly_profit'      => $monthlyProfit,
             'collection_rate'     => $collectionRateDetail,
-        ]);
+        ];
     }
 
     /**
      * Fill in missing months with zero values for chart consistency.
      */
-    private function fillMissingMonths($data, int $count, bool $isOrders = false)
+    private function fillMissingMonths($data, int $count, bool $isOrders = false): array
     {
         $filled = [];
         $now = now();

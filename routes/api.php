@@ -136,6 +136,7 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
     Route::get('/dashboard/financial', [DashboardController::class, 'financial']);
     Route::get('/dashboard/revenue', [DashboardController::class, 'revenue']);
+    Route::get('/dashboard/product-profits', [DashboardController::class, 'productProfits']);
 
     // Invoices
     Route::get('/invoices', [InvoiceController::class, 'adminIndex']);
@@ -183,6 +184,8 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     // Settings
     Route::get('/settings', [AdminSettingsController::class, 'index']);
     Route::put('/settings', [AdminSettingsController::class, 'update']);
+    Route::post('/settings/logo', [AdminSettingsController::class, 'uploadLogo']);
+    Route::delete('/settings/logo', [AdminSettingsController::class, 'deleteLogo']);
 
     // Users
     Route::get('/users', [AdminUserController::class, 'index']);

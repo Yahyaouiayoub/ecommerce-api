@@ -11,6 +11,10 @@ class Category extends Model
 
     protected $fillable = [
         'name',
+        'name_en',
+        'name_fr',
+        'name_ar',
+        'name_es',
         'slug',
         'description',
         'image',
@@ -23,5 +27,17 @@ class Category extends Model
     public function products()
     {
         return $this->hasMany(Product::class);
+    }
+
+    // =========================
+    // HELPERS
+    // =========================
+    /**
+     * Get the translated name for a given locale. Falls back to default name.
+     */
+    public function getNameForLocale(string $locale): ?string
+    {
+        $field = "name_{$locale}";
+        return $this->$field ?? $this->name;
     }
 }

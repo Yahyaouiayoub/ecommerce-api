@@ -11,7 +11,10 @@ class Expense extends Model
 
     protected $fillable = [
         'title',
+        'product_id',
         'amount',
+        'total_cost',
+        'quantity',
         'category',
         'note',
         'description',
@@ -21,6 +24,8 @@ class Expense extends Model
 
     protected $casts = [
         'expense_date' => 'date',
+        'amount'       => 'decimal:2',
+        'total_cost'   => 'decimal:2',
     ];
 
     // =========================
@@ -29,6 +34,11 @@ class Expense extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function product()
+    {
+        return $this->belongsTo(Product::class);
     }
 
     // =========================

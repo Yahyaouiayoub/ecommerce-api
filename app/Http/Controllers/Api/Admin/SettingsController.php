@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class SettingsController extends Controller
 {
@@ -18,6 +19,7 @@ class SettingsController extends Controller
             'shipping' => Setting::getShippingSettings(),
             'tax'      => Setting::getTaxSettings(),
             'invoice'  => Setting::getInvoiceSettings(),
+            'logo_url' => Setting::getValue('logo_url', ''),
         ]);
     }
 
@@ -72,6 +74,53 @@ class SettingsController extends Controller
             'shipping' => Setting::getShippingSettings(),
             'tax'      => Setting::getTaxSettings(),
             'invoice'  => Setting::getInvoiceSettings(),
+            'logo_url' => Setting::getValue('logo_url', ''),
+        ]);
+    }
+
+    /**
+     * Upload a logo image.
+     */
+    public function uploadLogo(Request $request)
+    {
+        $request->validate([
+            'logo' => 'required|image|mimes:png,jpg,jpeg,svg,webp|max:2048',
+        ]);
+
+        // Delete old logo if exists
+        $oldLogo = Setting::getValue('logo_url');
+        if ($oldLogo && Storage::disk('public')->exists($oldLogo)) {
+            Storage::disk('public')->delete($oldLogo);
+        }
+
+        $path = $request->file('logo')->store('logos', 'public');
+
+        Setting::setValue('logo_url', $path);
+
+        $url = Storage::disk('public')->url($path);
+
+        return response()->json([
+            'message' => 'Logo uploaded successfully',
+            'logo_url' => $url,
+            'logo_path' => $path,
+        ]);
+    }
+
+    /**
+     * Delete the logo (reset to default).
+     */
+    public function deleteLogo()
+    {
+        $logoPath = Setting::getValue('logo_url');
+
+        if ($logoPath && Storage::disk('public')->exists($logoPath)) {
+            Storage::disk('public')->delete($logoPath);
+        }
+
+        Setting::setValue('logo_url', '');
+
+        return response()->json([
+            'message' => 'Logo removed successfully',
         ]);
     }
 }

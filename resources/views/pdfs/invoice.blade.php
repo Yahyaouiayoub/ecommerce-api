@@ -22,7 +22,7 @@
 
         /* ===== HEADER ===== */
         .header {
-            border-bottom: 1px solid #e5e5e5;
+            border-bottom: 1px solid #d4d4d4;
             padding-bottom: 24px;
             margin-bottom: 24px;
             overflow: hidden;
@@ -33,13 +33,13 @@
         .header-left .company-name {
             font-size: 16px;
             font-weight: 600;
-            color: #262626;
+            color: #171717;
             letter-spacing: -0.02em;
             margin-bottom: 4px;
         }
         .header-left p {
             font-size: 9px;
-            color: #a3a3a3;
+            color: #404040;
             line-height: 1.6;
         }
         .header-right {
@@ -57,7 +57,7 @@
         .header-right .invoice-number {
             font-family: 'DejaVu Sans Mono', monospace;
             font-size: 12px;
-            color: #525252;
+            color: #262626;
         }
         .clearfix { clear: both; }
 
@@ -69,8 +69,8 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            border: 1px solid #e5e5e5;
-            color: #525252;
+            border: 1px solid #d4d4d4;
+            color: #171717;
         }
         .status-badge.paid {
             background: #171717;
@@ -80,8 +80,8 @@
         .status-badge.cancelled,
         .status-badge.refunded {
             text-decoration: line-through;
-            color: #a3a3a3;
-            border-color: #e5e5e5;
+            color: #525252;
+            border-color: #d4d4d4;
         }
 
         /* ===== SECTION ===== */
@@ -93,7 +93,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: #a3a3a3;
+            color: #404040;
             margin-bottom: 8px;
         }
 
@@ -113,7 +113,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: #a3a3a3;
+            color: #404040;
             padding-bottom: 2px;
         }
         .metadata-table .mono {
@@ -141,7 +141,7 @@
             margin-bottom: 2px;
         }
         .info-grid .detail {
-            color: #737373;
+            color: #404040;
             font-size: 10px;
             line-height: 1.6;
         }
@@ -152,7 +152,7 @@
         }
         .info-grid .due-date {
             font-size: 9px;
-            color: #a3a3a3;
+            color: #525252;
         }
 
         /* ===== PRODUCTS TABLE ===== */
@@ -162,13 +162,13 @@
             margin-bottom: 20px;
         }
         table.items th {
-            border-bottom: 1px solid #e5e5e5;
+            border-bottom: 1px solid #d4d4d4;
             padding: 6px 8px;
             font-size: 8px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: #a3a3a3;
+            color: #404040;
             text-align: left;
         }
         table.items th.text-right {
@@ -178,7 +178,7 @@
             text-align: center;
         }
         table.items td {
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid #e5e5e5;
             padding: 7px 8px;
             font-size: 10px;
             color: #171717;
@@ -208,14 +208,14 @@
         }
         .totals .label {
             text-align: left;
-            color: #737373;
+            color: #404040;
         }
         .totals .value {
             text-align: right;
             color: #171717;
         }
         .totals .separator td {
-            border-top: 1px solid #e5e5e5;
+            border-top: 1px solid #d4d4d4;
             padding: 0;
         }
         .totals .total td {
@@ -228,7 +228,7 @@
             font-size: 12px;
         }
         .totals .paid td .value {
-            color: #737373;
+            color: #525252;
         }
 
         /* ===== PAYMENTS ===== */
@@ -236,7 +236,7 @@
             margin-bottom: 20px;
         }
         .payment-item {
-            border-bottom: 1px solid #f5f5f5;
+            border-bottom: 1px solid #e5e5e5;
             padding: 6px 0;
             overflow: hidden;
         }
@@ -251,7 +251,7 @@
             width: 5px;
             height: 5px;
             border-radius: 50%;
-            background: #d4d4d4;
+            background: #a3a3a3;
             margin-right: 8px;
             vertical-align: middle;
         }
@@ -262,7 +262,7 @@
         }
         .payment-item .payment-left .date {
             font-size: 8px;
-            color: #a3a3a3;
+            color: #525252;
             margin-left: 13px;
         }
         .payment-item .payment-right {
@@ -279,20 +279,20 @@
         }
         .notes p {
             font-size: 10px;
-            color: #737373;
+            color: #404040;
             line-height: 1.6;
         }
 
         /* ===== FOOTER ===== */
         .footer {
-            border-top: 1px solid #e5e5e5;
+            border-top: 1px solid #d4d4d4;
             padding-top: 12px;
             margin-top: 24px;
             text-align: center;
         }
         .footer p {
             font-size: 8px;
-            color: #a3a3a3;
+            color: #525252;
             line-height: 1.6;
         }
     </style>
