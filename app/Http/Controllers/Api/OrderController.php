@@ -182,11 +182,12 @@ class OrderController extends Controller
                 ], 422);
             }
 
-            $subtotal += $product->price * $item->quantity;
+            $effectivePrice = $product->getEffectivePrice();
+            $subtotal += $effectivePrice * $item->quantity;
             $orderItems[] = [
                 'product_id' => $product->id,
                 'quantity' => $item->quantity,
-                'price' => $product->price,
+                'price' => $effectivePrice,
             ];
         }
 
@@ -376,7 +377,8 @@ class OrderController extends Controller
             $query->whereDate('created_at', '<=', $request->date_to);
         }
 
-        $orders = $query->latest()->get();
+        $perPage = (int) ($request->per_page ?? 20);
+        $orders = $query->latest()->paginate(min($perPage, 100));
 
         return response()->json($orders);
     }

@@ -15,7 +15,9 @@ class CategoryController extends Controller
     // =========================
     public function index()
     {
-        $categories = Category::withCount('products')->get();
+        $categories = Category::withCount('products')
+            ->where('is_active', true)
+            ->get();
         return response()->json($categories);
     }
 
@@ -26,6 +28,15 @@ class CategoryController extends Controller
     {
         $category = Category::with('products')->findOrFail($id);
         return response()->json($category);
+    }
+
+    // =========================
+    // ADMIN: GET ALL CATEGORIES (includes inactive)
+    // =========================
+    public function adminIndex()
+    {
+        $categories = Category::withCount('products')->get();
+        return response()->json($categories);
     }
 
     // =========================

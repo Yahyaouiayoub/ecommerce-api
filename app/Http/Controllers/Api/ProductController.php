@@ -121,12 +121,16 @@ class ProductController extends Controller
     {
         $products = Product::with('category', 'brand', 'images')
             ->withAvg('reviews', 'rating')
-            ->withCount(['reviews', 'orderItems as total_sold' => function ($q) {
-                $q->select(\Illuminate\Support\Facades\DB::raw('COALESCE(SUM(quantity), 0)'));
-            }])
+            ->withCount('reviews')
             ->where('is_active', true)
             ->where('stock', '>', 0)
-            ->having('total_sold', '>', 0)
+            ->whereIn('id', function ($query) {
+                $query->select('product_id')
+                    ->from('order_items')
+                    ->groupBy('product_id')
+                    ->havingRaw('COALESCE(SUM(quantity), 0) > 0');
+            })
+            ->withSum('orderItems as total_sold', 'quantity')
             ->orderBy('total_sold', 'desc')
             ->limit(8)
             ->get();
@@ -414,6 +418,68 @@ class ProductController extends Controller
             'message' => 'Product updated successfully',
             'product' => $product
         ]);
+    }
+
+    // =========================
+    // ADMIN: GET ALL PRODUCTS (includes out-of-stock, unlike public index)
+    // =========================
+    public function adminIndex(Request $request)
+    {
+        $query = Product::with('category', 'brand', 'images')
+            ->withAvg('reviews', 'rating')
+            ->withCount('reviews');
+
+        // Filter by category
+        if ($request->has('category_id')) {
+            $query->where('category_id', $request->category_id);
+        }
+
+        // Filter by brand
+        if ($request->has('brand_id')) {
+            $query->where('brand_id', $request->brand_id);
+        }
+
+        // Filter by search
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'LIKE', "%{$search}%")
+                  ->orWhere('description', 'LIKE', "%{$search}%")
+                  ->orWhere('sku', 'LIKE', "%{$search}%");
+            });
+        }
+
+        // Filter by active status
+        if ($request->has('is_active')) {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // Sort
+        if ($request->has('sort')) {
+            switch ($request->sort) {
+                case 'price_asc':
+                    $query->orderBy('price', 'asc');
+                    break;
+                case 'price_desc':
+                    $query->orderBy('price', 'desc');
+                    break;
+                case 'name_asc':
+                    $query->orderBy('name', 'asc');
+                    break;
+                case 'name_desc':
+                    $query->orderBy('name', 'desc');
+                    break;
+                default:
+                    $query->latest();
+            }
+        } else {
+            $query->latest();
+        }
+
+        $perPage = $request->per_page ?? 20;
+        $products = $query->paginate($perPage);
+
+        return response()->json($products);
     }
 
     // =========================

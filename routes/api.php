@@ -111,18 +111,20 @@ Route::get('/products/{id}/reviews', [ReviewController::class, 'index']);
 // =========================
 Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function () {
     // Products
-    Route::get('/products', [ProductController::class, 'index']);
+    Route::get('/products', [ProductController::class, 'adminIndex']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::put('/products/{id}', [ProductController::class, 'update']);
     Route::delete('/products/{id}', [ProductController::class, 'destroy']);
     Route::delete('/products/{productId}/images/{imageId}', [ProductController::class, 'deleteImage']);
 
     // Categories
+    Route::get('/categories', [CategoryController::class, 'adminIndex']);
     Route::post('/categories', [CategoryController::class, 'store']);
     Route::put('/categories/{id}', [CategoryController::class, 'update']);
     Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
 
     // Brands
+    Route::get('/brands', [BrandController::class, 'adminIndex']);
     Route::post('/brands', [BrandController::class, 'store']);
     Route::put('/brands/{id}', [BrandController::class, 'update']);
     Route::delete('/brands/{id}', [BrandController::class, 'destroy']);

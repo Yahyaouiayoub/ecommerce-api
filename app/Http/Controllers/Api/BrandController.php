@@ -15,7 +15,9 @@ class BrandController extends Controller
     // =========================
     public function index()
     {
-        $brands = Brand::withCount('products')->get();
+        $brands = Brand::withCount('products')
+            ->where('is_active', true)
+            ->get();
         return response()->json($brands);
     }
 
@@ -26,6 +28,15 @@ class BrandController extends Controller
     {
         $brand = Brand::with('products')->findOrFail($id);
         return response()->json($brand);
+    }
+
+    // =========================
+    // ADMIN: GET ALL BRANDS (includes inactive)
+    // =========================
+    public function adminIndex()
+    {
+        $brands = Brand::withCount('products')->get();
+        return response()->json($brands);
     }
 
     // =========================
