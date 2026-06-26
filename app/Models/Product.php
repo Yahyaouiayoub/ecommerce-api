@@ -76,6 +76,16 @@ class Product extends Model
         return $this->hasMany(Review::class);
     }
 
+    public function variants()
+    {
+        return $this->hasMany(ProductVariant::class)->orderBy('sort_order');
+    }
+
+    public function defaultVariant()
+    {
+        return $this->hasOne(ProductVariant::class)->where('is_default', true);
+    }
+
     // =========================
     // ACCESSORS
     // =========================

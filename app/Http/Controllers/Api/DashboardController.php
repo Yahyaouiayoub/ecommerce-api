@@ -193,9 +193,11 @@ class DashboardController extends Controller
             'paid_invoices' => $paidInvoices,
             'pending_invoices' => $pendingInvoices,
             'refunded_invoices' => $refundedInvoices,
-            'failed_invoices' => $failedInvoices,
-            'cancelled_invoices' => $cancelledInvoices,
+            'failed_invoices' => $failedInvoices,            'cancelled_invoices'   => $cancelledInvoices,
             'total_pending_amount' => $totalPendingAmount,
+
+            // Refund alert
+            'refund_alert_count' => $this->computeRefundAlertCount(),
 
             // Legacy revenue fields (backward compat)
             'total_expenses' => $totalExpenses,
@@ -222,6 +224,21 @@ class DashboardController extends Controller
                     'created_at' => $order->created_at,
                 ]),
         ];
+    }
+
+    /**
+     * Count cancelled orders with paid invoices that haven't been refunded.
+     */
+    private function computeRefundAlertCount(): int
+    {
+        return Order::where('status', 'cancelled')
+            ->whereHas('invoices', function ($q) {
+                $q->where('status', 'paid');
+            })
+            ->whereDoesntHave('invoices', function ($q) {
+                $q->where('status', 'refunded');
+            })
+            ->count();
     }
 
     /**

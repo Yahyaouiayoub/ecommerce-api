@@ -40,7 +40,7 @@ class CartController extends Controller
     {
         $identifier = $this->getCartIdentifier($request);
 
-        $cart = Cart::with('product')
+        $cart = Cart::with('product', 'variant')
             ->where('status', 'active')
             ->when($identifier['user_id'], function ($query) use ($identifier) {
                 return $query->where('user_id', $identifier['user_id']);
@@ -66,6 +66,7 @@ class CartController extends Controller
         $request->validate([
             'product_id' => 'required|exists:products,id',
             'quantity' => 'sometimes|integer|min:1',
+            'variant_id' => 'nullable|exists:product_variants,id',
         ]);
 
         $identifier = $this->getCartIdentifier($request);
@@ -78,13 +79,31 @@ class CartController extends Controller
 
         $product = \App\Models\Product::findOrFail($request->product_id);
 
-        if ($product->stock === 0) {
+        // Validate variant belongs to this product
+        $variant = null;
+        if ($request->variant_id) {
+            $variant = \App\Models\ProductVariant::where('id', $request->variant_id)
+                ->where('product_id', $request->product_id)
+                ->first();
+            if (!$variant) {
+                return response()->json([
+                    'message' => 'Invalid variant for this product.'
+                ], 422);
+            }
+        }
+
+        // Check stock (use variant stock if variant selected, otherwise product stock)
+        $stockCheck = $variant ? $variant->stock : $product->stock;
+        if ($stockCheck <= 0) {
+            $itemName = $variant ? $variant->name : $product->name;
             return response()->json([
-                'message' => "{$product->name} is out of stock."
+                'message' => "{$itemName} is out of stock."
             ], 422);
         }
 
+        // Find existing cart item matching same product + variant
         $cart = Cart::where('product_id', $request->product_id)
+            ->where('variant_id', $request->variant_id)
             ->when($identifier['user_id'], function ($query) use ($identifier) {
                 return $query->where('user_id', $identifier['user_id']);
             })
@@ -98,9 +117,10 @@ class CartController extends Controller
             $newQuantity = $cart->quantity + $newQuantity;
         }
 
-        if ($newQuantity > $product->stock) {
+        if ($newQuantity > $stockCheck) {
+            $maxStock = $stockCheck;
             return response()->json([
-                'message' => "Only {$product->stock} unit(s) of {$product->name} are available."
+                'message' => "Only {$maxStock} unit(s) available."
             ], 422);
         }
 
@@ -112,6 +132,7 @@ class CartController extends Controller
                 'user_id' => $identifier['user_id'],
                 'session_id' => $identifier['session_id'],
                 'product_id' => $request->product_id,
+                'variant_id' => $request->variant_id,
                 'quantity' => $newQuantity,
             ]);
         }
@@ -134,7 +155,7 @@ class CartController extends Controller
 
         $identifier = $this->getCartIdentifier($request);
 
-        $cart = Cart::where('id', $id)
+        $cart = Cart::with('product', 'variant')->where('id', $id)
             ->when($identifier['user_id'], function ($query) use ($identifier) {
                 return $query->where('user_id', $identifier['user_id']);
             })
@@ -144,10 +165,11 @@ class CartController extends Controller
             ->firstOrFail();
 
         $product = $cart->product;
+        $stockCheck = $cart->variant ? $cart->variant->stock : ($product ? $product->stock : 0);
 
-        if ($product && $request->quantity > $product->stock) {
+        if ($product && $request->quantity > $stockCheck) {
             return response()->json([
-                'message' => "Only {$product->stock} unit(s) of {$product->name} are available."
+                'message' => "Only {$stockCheck} unit(s) available."
             ], 422);
         }
 
@@ -224,6 +246,7 @@ class CartController extends Controller
         foreach ($guestCart as $item) {
             $userCart = Cart::where('user_id', $user->id)
                 ->where('product_id', $item->product_id)
+                ->where('variant_id', $item->variant_id)
                 ->first();
 
             if ($userCart) {

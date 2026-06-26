@@ -13,6 +13,8 @@ use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\ReviewController;
+use App\Http\Controllers\Api\ProductVariantController;
+use App\Http\Controllers\Api\PayPalController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Admin\CartController as AdminCartController;
 use App\Http\Controllers\Api\Admin\SettingsController as AdminSettingsController;
@@ -104,7 +106,27 @@ Route::get('/shipping-methods', [\App\Http\Controllers\Api\ShippingMethodControl
 // =========================
 // PUBLIC REVIEW ROUTE
 // =========================
+// =========================
+// PRODUCT VARIANTS (public)
+// =========================
+Route::get('/products/{productId}/variants', [\App\Http\Controllers\Api\ProductVariantController::class, 'index']);
+Route::get('/variants/{id}', [\App\Http\Controllers\Api\ProductVariantController::class, 'show']);
+
+// =========================
+// PUBLIC REVIEW ROUTE
+// =========================
 Route::get('/products/{id}/reviews', [ReviewController::class, 'index']);
+
+// =========================
+// PAYPAL CALLBACKS (no auth — redirect-based)
+// =========================
+Route::get('/paypal/return', [PayPalController::class, 'returnCallback'])->name('paypal.return');
+Route::get('/paypal/cancel', [PayPalController::class, 'cancelCallback'])->name('paypal.cancel');
+
+// =========================
+// PAYPAL PAYMENT CREATION (authenticated)
+// =========================
+Route::middleware('auth:sanctum')->post('/paypal/create', [PayPalController::class, 'createPayment']);
 
 // =========================
 // ADMIN ROUTES
@@ -122,6 +144,12 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/categories', [CategoryController::class, 'store']);
     Route::put('/categories/{id}', [CategoryController::class, 'update']);
     Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
+
+    // Product Variants
+    Route::post('/products/{product}/variants', [ProductVariantController::class, 'store']);
+    Route::get('/variants/{id}', [ProductVariantController::class, 'show']);
+    Route::put('/variants/{id}', [ProductVariantController::class, 'update']);
+    Route::delete('/variants/{id}', [ProductVariantController::class, 'destroy']);
 
     // Brands
     Route::get('/brands', [BrandController::class, 'adminIndex']);
@@ -182,6 +210,11 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/shipping-methods', [AdminShippingMethodController::class, 'store']);
     Route::put('/shipping-methods/{shippingMethod}', [AdminShippingMethodController::class, 'update']);
     Route::delete('/shipping-methods/{shippingMethod}', [AdminShippingMethodController::class, 'destroy']);
+
+    // PayPal
+    Route::post('/paypal/test', [PayPalController::class, 'testConnection']);
+    Route::get('/paypal/settings', [PayPalController::class, 'getSettings']);
+    Route::post('/paypal/settings', [PayPalController::class, 'saveSettings']);
 
     // Settings
     Route::get('/settings', [AdminSettingsController::class, 'index']);

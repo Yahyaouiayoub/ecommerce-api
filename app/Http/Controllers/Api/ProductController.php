@@ -18,7 +18,7 @@ class ProductController extends Controller
     // =========================
     public function index(Request $request)
     {
-        $query = Product::with('category', 'brand', 'images')
+        $query = Product::with('category', 'brand', 'images', 'variants')
             ->withAvg('reviews', 'rating')
             ->withCount('reviews')
             ->where('stock', '>', 0);
@@ -119,7 +119,7 @@ class ProductController extends Controller
     // =========================
     public function bestSellers()
     {
-        $products = Product::with('category', 'brand', 'images')
+        $products = Product::with('category', 'brand', 'images', 'variants')
             ->withAvg('reviews', 'rating')
             ->withCount('reviews')
             ->where('is_active', true)
@@ -143,7 +143,7 @@ class ProductController extends Controller
     // =========================
     public function featured()
     {
-        $products = Product::with('category', 'brand', 'images')
+        $products = Product::with('category', 'brand', 'images', 'variants')
             ->withAvg('reviews', 'rating')
             ->withCount('reviews')
             ->where('is_active', true)
@@ -156,15 +156,34 @@ class ProductController extends Controller
     }
 
     // =========================
-    // GET SINGLE PRODUCT
+    // GET SINGLE PRODUCT (by ID or slug)
     // =========================
-    public function show($id)
+    public function show($identifier)
     {
-        $product = Product::with('category', 'brand', 'images', 'reviews.user:id,first_name,last_name,avatar')
+        $query = Product::with('category', 'brand', 'images', 'variants', 'reviews.user:id,first_name,last_name,avatar')
             ->withAvg('reviews', 'rating')
-            ->withCount('reviews')
-            ->findOrFail($id);
-        return response()->json($product);
+            ->withCount('reviews');
+
+        if (is_numeric($identifier)) {
+            $product = $query->findOrFail((int) $identifier);
+        } else {
+            $product = $query->where('slug', $identifier)->firstOrFail();
+        }
+
+        // Load related products (same category, exclude current, limit 4)
+        $relatedProducts = Product::with('category', 'brand', 'images')
+            ->where('category_id', $product->category_id)
+            ->where('id', '!=', $product->id)
+            ->where('is_active', true)
+            ->where('stock', '>', 0)
+            ->inRandomOrder()
+            ->limit(4)
+            ->get();
+
+        $data = $product->toArray();
+        $data['related_products'] = $relatedProducts;
+
+        return response()->json($data);
     }
 
     // =========================

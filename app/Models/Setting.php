@@ -49,6 +49,9 @@ class Setting extends Model
         if (str_starts_with($key, 'invoice_') || str_starts_with($key, 'company_')) {
             return 'invoice';
         }
+        if (str_starts_with($key, 'paypal_')) {
+            return 'paypal';
+        }
         if (str_starts_with($key, 'logo_')) {
             return 'general';
         }
@@ -120,6 +123,22 @@ class Setting extends Model
             'company_email'        => (string) ($settings['company_email'] ?? 'contact@lumenstore.com'),
             'payment_terms'        => (int) ($settings['invoice_payment_terms_days'] ?? 30),
             'footer_notes'         => (string) ($settings['invoice_footer_notes'] ?? 'Thank you for your business!'),
+        ];
+    }
+
+    /**
+     * Get PayPal settings as an array.
+     */
+    public static function getPayPalSettings(): array
+    {
+        $settings = static::where('group', 'paypal')->get()->keyBy('key')->map->value->toArray();
+
+        return [
+            'enabled'       => (bool) ($settings['paypal_enabled'] ?? false),
+            'mode'          => (string) ($settings['paypal_mode'] ?? 'sandbox'),
+            'client_id'     => (string) ($settings['paypal_client_id'] ?? ''),
+            'client_secret' => (string) ($settings['paypal_client_secret'] ?? ''),
+            'webhook_id'    => (string) ($settings['paypal_webhook_id'] ?? ''),
         ];
     }
 }

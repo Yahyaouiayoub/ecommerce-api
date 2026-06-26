@@ -12,6 +12,8 @@ class SettingsController extends Controller
      */
     public function public()
     {
+        $paypalEnabled = (bool) Setting::getValue('paypal_enabled', false);
+
         return response()->json([
             'shipping'         => Setting::getShippingSettings(),
             'tax'              => Setting::getTaxSettings(),
@@ -22,6 +24,7 @@ class SettingsController extends Controller
             'company_country'  => Setting::getValue('company_country', 'Morocco'),
             'company_phone'    => Setting::getValue('company_phone', '+212 5XX-XXXXXX'),
             'company_email'    => Setting::getValue('company_email', 'contact@lumenstore.com'),
+            'paypal_enabled'   => $paypalEnabled,
         ]);
     }
 }

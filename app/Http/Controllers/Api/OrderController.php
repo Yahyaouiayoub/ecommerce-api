@@ -130,7 +130,7 @@ class OrderController extends Controller
         $user = auth('sanctum')->user();
 
         $request->validate([
-            'payment_method' => 'required|in:cod,card',
+            'payment_method' => 'required|in:cod,card,paypal',
             'shipping_method_id' => 'sometimes|nullable|integer|exists:shipping_methods,id',
             'notes' => 'nullable|string',
         ]);
@@ -176,16 +176,31 @@ class OrderController extends Controller
 
             if (!$product) continue;
 
-            if ($product->stock < $item->quantity) {
+            // If cart item has a variant, check variant stock instead of product stock
+            $stockCheck = $product->stock;
+            $effectivePrice = $product->getEffectivePrice();
+            $variantId = null;
+
+            if ($item->variant_id) {
+                $variant = \App\Models\ProductVariant::find($item->variant_id);
+                if ($variant && $variant->product_id === $product->id) {
+                    $stockCheck = $variant->stock;
+                    $effectivePrice = $variant->effective_price;
+                    $variantId = $variant->id;
+                }
+            }
+
+            if ($stockCheck < $item->quantity) {
+                $itemName = $variantId ? ($variant->name ?? $product->name) : $product->name;
                 return response()->json([
-                    'message' => "Insufficient stock for product: {$product->name}"
+                    'message' => "Insufficient stock for item: {$itemName}"
                 ], 422);
             }
 
-            $effectivePrice = $product->getEffectivePrice();
             $subtotal += $effectivePrice * $item->quantity;
             $orderItems[] = [
                 'product_id' => $product->id,
+                'variant_id' => $variantId,
                 'quantity' => $item->quantity,
                 'price' => $effectivePrice,
             ];
@@ -243,12 +258,17 @@ class OrderController extends Controller
                 OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $item['product_id'],
+                    'variant_id' => $item['variant_id'] ?? null,
                     'quantity' => $item['quantity'],
                     'price' => $item['price'],
                 ]);
 
-                // Reduce stock
-                Product::find($item['product_id'])->decrement('stock', $item['quantity']);
+                // Reduce stock (variant stock if applicable, otherwise product stock)
+                if ($item['variant_id'] ?? null) {
+                    \App\Models\ProductVariant::find($item['variant_id'])->decrement('stock', $item['quantity']);
+                } else {
+                    Product::find($item['product_id'])->decrement('stock', $item['quantity']);
+                }
             }
 
             // Create invoice for the order
@@ -438,10 +458,14 @@ class OrderController extends Controller
             ]);
         }
 
-        // If cancelled, restore stock
+        // If cancelled, restore stock (variant stock if applicable)
         if ($newStatus === 'cancelled') {
             foreach ($order->items as $item) {
-                Product::where('id', $item->product_id)->increment('stock', $item->quantity);
+                if ($item->variant_id) {
+                    \App\Models\ProductVariant::where('id', $item->variant_id)->increment('stock', $item->quantity);
+                } else {
+                    Product::where('id', $item->product_id)->increment('stock', $item->quantity);
+                }
             }
         }
 
