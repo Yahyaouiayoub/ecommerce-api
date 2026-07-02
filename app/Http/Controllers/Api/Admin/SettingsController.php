@@ -4,23 +4,30 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
+use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class SettingsController extends Controller
 {
     /**
-     * Get all settings grouped by their group.
+     * Get all settings grouped by their group. (cached)
      */
-    public function index()
+    public function index(?CacheService $cacheService = null)
     {
-        return response()->json([
-            'settings' => Setting::getGrouped(),
-            'shipping' => Setting::getShippingSettings(),
-            'tax'      => Setting::getTaxSettings(),
-            'invoice'  => Setting::getInvoiceSettings(),
-            'logo_url' => Setting::getValue('logo_url', ''),
-        ]);
+        $cacheService ??= app(CacheService::class);
+
+        $data = $cacheService->rememberAdminSettings(function () {
+            return [
+                'settings' => Setting::getGrouped(),
+                'shipping' => Setting::getShippingSettings(),
+                'tax'      => Setting::getTaxSettings(),
+                'invoice'  => Setting::getInvoiceSettings(),
+                'logo_url' => Setting::getValue('logo_url', ''),
+            ];
+        });
+
+        return response()->json($data);
     }
 
     /**
@@ -68,6 +75,9 @@ class SettingsController extends Controller
             Setting::setValue($key, $value !== null ? (string) $value : '');
         }
 
+        // Invalidate settings cache
+        app(CacheService::class)->invalidateSettings();
+
         return response()->json([
             'message'  => 'Settings updated successfully',
             'settings' => Setting::getGrouped(),
@@ -83,6 +93,7 @@ class SettingsController extends Controller
      */
     public function uploadLogo(Request $request)
     {
+        app(CacheService::class)->invalidateSettings();
         $request->validate([
             'logo' => 'required|image|mimes:png,jpg,jpeg,svg,webp|max:2048',
         ]);
@@ -111,6 +122,7 @@ class SettingsController extends Controller
      */
     public function deleteLogo()
     {
+        app(CacheService::class)->invalidateSettings();
         $logoPath = Setting::getValue('logo_url');
 
         if ($logoPath && Storage::disk('public')->exists($logoPath)) {

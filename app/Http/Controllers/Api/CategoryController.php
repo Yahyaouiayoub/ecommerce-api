@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -11,13 +12,18 @@ use Illuminate\Support\Str;
 class CategoryController extends Controller
 {
     // =========================
-    // GET ALL CATEGORIES
+    // GET ALL CATEGORIES (cached)
     // =========================
-    public function index()
+    public function index(?CacheService $cacheService = null)
     {
-        $categories = Category::withCount('products')
-            ->where('is_active', true)
-            ->get();
+        $cacheService ??= app(CacheService::class);
+
+        $categories = $cacheService->rememberCategories(function () {
+            return Category::withCount('products')
+                ->where('is_active', true)
+                ->get();
+        });
+
         return response()->json($categories);
     }
 
@@ -26,24 +32,32 @@ class CategoryController extends Controller
     // =========================
     public function show($id)
     {
-        $category = Category::with('products')->findOrFail($id);
+        $category = Category::with(['products' => function ($q) {
+            $q->select('id', 'name', 'slug', 'price', 'discount_price', 'stock', 'thumbnail', 'category_id');
+        }])->findOrFail($id);
         return response()->json($category);
     }
 
     // =========================
-    // ADMIN: GET ALL CATEGORIES (includes inactive)
+    // ADMIN: GET ALL CATEGORIES (includes inactive, cached)
     // =========================
-    public function adminIndex()
+    public function adminIndex(?CacheService $cacheService = null)
     {
-        $categories = Category::withCount('products')->get();
+        $cacheService ??= app(CacheService::class);
+
+        $categories = $cacheService->rememberAdminCategories(function () {
+            return Category::withCount('products')->get();
+        });
+
         return response()->json($categories);
     }
 
     // =========================
-    // CREATE CATEGORY (ADMIN)
+    // CREATE CATEGORY (ADMIN) — invalidates caches
     // =========================
     public function store(Request $request)
     {
+        app(CacheService::class)->invalidateCategories();
         $request->validate([
             'name' => 'required|string|max:255',
             'name_en' => 'nullable|string|max:255',
@@ -73,10 +87,11 @@ class CategoryController extends Controller
     }
 
     // =========================
-    // UPDATE CATEGORY (ADMIN)
+    // UPDATE CATEGORY (ADMIN) — invalidates caches
     // =========================
     public function update(Request $request, $id)
     {
+        app(CacheService::class)->invalidateCategories();
         $category = Category::findOrFail($id);
 
         $request->validate([
@@ -125,10 +140,11 @@ class CategoryController extends Controller
     }
 
     // =========================
-    // DELETE CATEGORY (ADMIN)
+    // DELETE CATEGORY (ADMIN) — invalidates caches
     // =========================
     public function destroy($id)
     {
+        app(CacheService::class)->invalidateCategories();
         $category = Category::findOrFail($id);
 
         // Delete category image from storage

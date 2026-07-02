@@ -19,6 +19,9 @@ class Order extends Model
         'address_id',
         'shipping_method_id',
         'notes',
+        'coupon_code',
+        'discount_amount',
+        'discount_type',
         'guest_email',
         'guest_name',
     ];

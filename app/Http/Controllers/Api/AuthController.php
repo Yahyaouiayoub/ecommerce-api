@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Cart;
+use App\Notifications\VerifyEmailNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
@@ -40,6 +41,13 @@ class AuthController extends Controller
         // Merge guest cart if exists
         if ($request->session_id) {
             $this->mergeGuestCart($user, $request->session_id);
+        }
+
+        // Send email verification notification
+        try {
+            $user->notify(new VerifyEmailNotification());
+        } catch (\Exception $e) {
+            // Don't block registration if email sending fails
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;

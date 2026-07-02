@@ -76,6 +76,11 @@ class Product extends Model
         return $this->hasMany(Review::class);
     }
 
+    public function wishlists()
+    {
+        return $this->hasMany(Wishlist::class);
+    }
+
     public function variants()
     {
         return $this->hasMany(ProductVariant::class)->orderBy('sort_order');

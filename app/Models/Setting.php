@@ -52,8 +52,17 @@ class Setting extends Model
         if (str_starts_with($key, 'paypal_')) {
             return 'paypal';
         }
+        if (str_starts_with($key, 'mail_')) {
+            return 'mail';
+        }
+        if (str_starts_with($key, 'social_')) {
+            return 'social';
+        }
         if (str_starts_with($key, 'logo_')) {
             return 'general';
+        }
+        if (str_starts_with($key, 'coupon_')) {
+            return 'coupon';
         }
         return null;
     }

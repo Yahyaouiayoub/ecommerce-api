@@ -10,7 +10,14 @@ use App\Models\OrderItem;
 use App\Models\User;
 use App\Models\Revenue;
 use App\Models\Cart;
+use App\Models\Wishlist;
+use App\Models\Coupon;
+use App\Models\CouponUsage;
 use App\Models\Expense;
+use App\Models\Refund;
+use App\Models\RefundItem;
+use App\Models\Promotion;
+use App\Services\RefundService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -182,6 +189,34 @@ class DashboardController extends Controller
             'total_users' => User::where('role', 'client')->count(),
             'total_admins' => User::where('role', 'admin')->count(),
 
+            // Coupon stats
+            'total_coupons' => Coupon::count(),
+            'active_coupons' => Coupon::active()->count(),
+            'total_coupon_discount' => (float) CouponUsage::sum('discount_amount'),
+            'total_coupon_uses' => CouponUsage::count(),
+            'most_used_coupon' => CouponUsage::select('coupon_id')
+                ->selectRaw('COUNT(*) as usage_count')
+                ->selectRaw('SUM(discount_amount) as total_discount')
+                ->groupBy('coupon_id')
+                ->orderByDesc('usage_count')
+                ->with('coupon:id,code,type,value')
+                ->first(),
+
+            // Wishlist stats
+            'total_wishlist_items' => Wishlist::count(),
+            'most_wishlisted_products' => Product::whereHas('wishlists')
+                ->withCount('wishlists')
+                ->orderByDesc('wishlists_count')
+                ->take(5)
+                ->get()
+                ->map(fn($product) => [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'slug' => $product->slug,
+                    'thumbnail' => $product->thumbnail,
+                    'wishlists_count' => $product->wishlists_count,
+                ]),
+
             // Cart analytics
             'total_carts' => Cart::count(),
             'active_carts' => $activeCarts,
@@ -195,6 +230,32 @@ class DashboardController extends Controller
             'refunded_invoices' => $refundedInvoices,
             'failed_invoices' => $failedInvoices,            'cancelled_invoices'   => $cancelledInvoices,
             'total_pending_amount' => $totalPendingAmount,
+
+            // Refund stats
+            'total_refunds' => Refund::count(),
+            'pending_refunds' => Refund::where('status', 'pending')->count(),
+            'approved_refunds' => Refund::where('status', 'approved')->count(),
+            'rejected_refunds' => Refund::where('status', 'rejected')->count(),
+            'completed_refunds' => Refund::where('status', 'completed')->count(),
+            'total_refunded_amount' => (float) Refund::whereIn('status', ['approved', 'completed'])->sum('refund_amount'),
+            'top_refunded_products' => RefundItem::selectRaw('order_item_id, SUM(quantity) as total_qty, SUM(amount) as total_amount')
+                ->whereHas('refund', fn($q) => $q->whereIn('status', ['approved', 'completed']))
+                ->groupBy('order_item_id')
+                ->orderByDesc('total_amount')
+                ->with('orderItem.product')
+                ->take(5)
+                ->get()
+                ->map(fn($item) => [
+                    'product_name' => $item->orderItem?->product?->name ?? 'N/A',
+                    'total_qty'    => (int) $item->total_qty,
+                    'total_amount' => (float) $item->total_amount,
+                ]),
+
+            // Promotion stats
+            'total_promotions'   => Promotion::count(),
+            'active_promotions'  => Promotion::active()->count(),
+            'scheduled_promotions' => Promotion::where('is_active', true)->where('starts_at', '>', $now)->count(),
+            'expired_promotions' => Promotion::where('is_active', true)->where('ends_at', '<', $now)->count(),
 
             // Refund alert
             'refund_alert_count' => $this->computeRefundAlertCount(),
@@ -279,23 +340,34 @@ class DashboardController extends Controller
     }
 
     /**
-     * Get per-product profit breakdown.
+     * Get per-product profit breakdown with pagination.
      * Shows each product's purchase cost, units sold, total revenue, total cost, profit, and margin.
      */
-    public function productProfits()
+    public function productProfits(Request $request)
     {
-        $products = Product::where('is_active', true)->get();
+        // Single aggregated query instead of N+1 per product
+        $orderItemSales = OrderItem::selectRaw('
+                product_id,
+                COALESCE(SUM(quantity), 0) as total_sold,
+                COALESCE(SUM(quantity * price), 0) as total_revenue
+            ')
+            ->whereHas('order', function ($q) {
+                $q->whereIn('status', ['delivered', 'shipped']);
+            })
+            ->groupBy('product_id')
+            ->get()
+            ->keyBy('product_id');
+
+        $soldProductIds = $orderItemSales->keys()->toArray();
+        $products = Product::whereIn('id', $soldProductIds)
+            ->where('is_active', true)
+            ->get()
+            ->keyBy('id');
 
         $results = [];
-        foreach ($products as $product) {
-            // Total units sold from delivered orders only
-            $soldData = OrderItem::where('product_id', $product->id)
-                ->whereHas('order', function ($q) {
-                    $q->whereIn('status', ['delivered', 'shipped']);
-                })
-                ->selectRaw('COALESCE(SUM(quantity), 0) as total_sold')
-                ->selectRaw('COALESCE(SUM(quantity * price), 0) as total_revenue')
-                ->first();
+        foreach ($orderItemSales as $productId => $soldData) {
+            $product = $products->get($productId);
+            if (!$product) continue;
 
             $totalSold = (int) $soldData->total_sold;
             $totalRevenue = (float) $soldData->total_revenue;
@@ -304,7 +376,7 @@ class DashboardController extends Controller
             $profit = round($totalRevenue - $totalCost, 2);
             $margin = $totalRevenue > 0 ? round(($profit / $totalRevenue) * 100, 1) : 0;
 
-            // Skip products with zero sales or zero purchase price (not relevant)
+            // Skip products with zero sales
             if ($totalSold === 0) continue;
 
             $results[] = [
@@ -323,10 +395,23 @@ class DashboardController extends Controller
         // Sort by profit descending
         usort($results, fn($a, $b) => $b['profit'] <=> $a['profit']);
 
+        // Paginate
+        $page = max(1, (int) $request->input('page', 1));
+        $perPage = max(1, min(100, (int) $request->input('per_page', 15)));
+        $totalCount = count($results);
+        $lastPage = max(1, (int) ceil($totalCount / $perPage));
+        $page = min($page, $lastPage);
+
+        $offset = ($page - 1) * $perPage;
+        $paginatedResults = array_slice($results, $offset, $perPage);
+
         return response()->json([
-            'data'        => $results,
-            'total_count' => count($results),
-            'summary'     => [
+            'data'         => $paginatedResults,
+            'total_count'  => $totalCount,
+            'current_page' => $page,
+            'per_page'     => $perPage,
+            'last_page'    => $lastPage,
+            'summary'      => [
                 'total_revenue' => round(array_sum(array_column($results, 'total_revenue')), 2),
                 'total_cost'    => round(array_sum(array_column($results, 'total_cost')), 2),
                 'total_profit'  => round(array_sum(array_column($results, 'profit')), 2),

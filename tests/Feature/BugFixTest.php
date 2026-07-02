@@ -912,12 +912,12 @@ class BugFixTest extends TestCase
         $response = $this->getJson('/api/orders', $this->clientHeaders());
 
         $response->assertOk();
-        $orderIds = collect($response->json())->pluck('id')->toArray();
-        $orderNumbers = collect($response->json())->pluck('order_number')->toArray();
+        $orderIds = collect($response->json('data'))->pluck('id')->toArray();
+        $orderNumbers = collect($response->json('data'))->pluck('order_number')->toArray();
 
         $this->assertContains($clientOrder->id, $orderIds, 'User should see their own order');
         $this->assertNotContains($otherOrder->id, $orderIds, 'User should NOT see another user\'s order');
-        $this->assertCount(1, $response->json(), 'User should see exactly 1 order (their own)');
+        $this->assertCount(1, $response->json('data'), 'User should see exactly 1 order (their own)');
     }
 
     public function test_user_can_view_own_order_by_id(): void
@@ -972,7 +972,7 @@ class BugFixTest extends TestCase
         $response = $this->getJson('/api/orders');
 
         $response->assertOk();
-        $this->assertCount(0, $response->json(), 'Unauthenticated user without session should get empty orders array');
+        $this->assertCount(0, $response->json('data'), 'Unauthenticated user without session should get empty orders array');
     }
 
     public function test_guest_with_session_sees_own_orders(): void
@@ -998,7 +998,7 @@ class BugFixTest extends TestCase
         $response = $this->getJson('/api/orders', ['X-Session-Id' => $sessionId]);
 
         $response->assertOk();
-        $this->assertCount(2, $response->json(), 'Guest should see orders for their session');
+        $this->assertCount(2, $response->json('data'), 'Guest should see orders for their session');
     }
 
     public function test_guest_cannot_see_another_sessions_orders(): void
@@ -1022,7 +1022,7 @@ class BugFixTest extends TestCase
         $response = $this->getJson('/api/orders', ['X-Session-Id' => 'session-beta']);
 
         $response->assertOk();
-        $this->assertCount(0, $response->json(), 'Guest with different session should not see other sessions\' orders');
+        $this->assertCount(0, $response->json('data'), 'Guest with different session should not see other sessions\' orders');
     }
 
     public function test_guest_can_view_own_session_order_by_id(): void
@@ -1711,7 +1711,8 @@ class BugFixTest extends TestCase
         $listResponse = $this->getJson('/api/orders', ['X-Session-Id' => $sessionId]);
 
         $listResponse->assertOk();
-        $orderIds = collect($listResponse->json())->pluck('id')->toArray();
+        $orderIds = collect($listResponse->json('data'))->pluck('id')->toArray();
         $this->assertContains($orderId, $orderIds, 'Guest should be able to retrieve their created order');
     }
 }
+

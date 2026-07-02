@@ -3,154 +3,167 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Coupon;
 use App\Models\Expense;
 use App\Models\Product;
 use App\Models\ProductImage;
+use App\Services\CacheService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class ProductController extends Controller
 {
     // =========================
-    // GET ALL PRODUCTS
+    // GET ALL PRODUCTS (cached per filter/sort/page)
     // =========================
-    public function index(Request $request)
+    public function index(Request $request, ?CacheService $cacheService = null)
     {
-        $query = Product::with('category', 'brand', 'images', 'variants')
-            ->withAvg('reviews', 'rating')
-            ->withCount('reviews')
-            ->where('stock', '>', 0);
+        $cacheService ??= app(CacheService::class);
 
-        // Filter by category
-        if ($request->has('category_id')) {
-            $query->where('category_id', $request->category_id);
-        }
+        $products = $cacheService->rememberProductList($request, function () use ($request) {
+            $query = Product::with('category', 'brand', 'images', 'variants')
+                ->withAvg('reviews', 'rating')
+                ->withCount('reviews')
+                ->where('stock', '>', 0);
 
-        // Filter by brand
-        if ($request->has('brand_id')) {
-            $query->where('brand_id', $request->brand_id);
-        }
-
-        // Filter by new arrivals (products created within the last 30 days)
-        if ($request->boolean('new_arrivals')) {
-            $query->where('created_at', '>=', now()->subDays(30));
-        }
-
-        // Filter by best sellers (products that have been ordered)
-        if ($request->boolean('best_sellers')) {
-            $query->whereHas('orderItems');
-        }
-
-        // Filter by search (name, category name, brand name, SKU)
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('description', 'LIKE', "%{$search}%")
-                  ->orWhere('sku', 'LIKE', "%{$search}%")
-                  ->orWhereHas('category', function ($cq) use ($search) {
-                      $cq->where('name', 'LIKE', "%{$search}%");
-                  })
-                  ->orWhereHas('brand', function ($bq) use ($search) {
-                      $bq->where('name', 'LIKE', "%{$search}%");
-                  });
-            });
-        }
-
-        // Filter by price range
-        if ($request->has('min_price')) {
-            $query->where('price', '>=', $request->min_price);
-        }
-        if ($request->has('max_price')) {
-            $query->where('price', '<=', $request->max_price);
-        }
-
-        // Sort
-        if ($request->has('sort')) {
-            switch ($request->sort) {
-                case 'price_asc':
-                    $query->orderBy('price', 'asc');
-                    break;
-                case 'price_desc':
-                    $query->orderBy('price', 'desc');
-                    break;
-                case 'name_asc':
-                    $query->orderBy('name', 'asc');
-                    break;
-                case 'name_desc':
-                    $query->orderBy('name', 'desc');
-                    break;
-                case 'popular':
-                    // Sort by number of reviews (descending) as a popularity metric
-                    $query->withCount('reviews')->orderBy('reviews_count', 'desc');
-                    break;
-                default:
-                    $query->latest();
+            // Filter by category
+            if ($request->has('category_id')) {
+                $query->where('category_id', $request->category_id);
             }
-        } else {
-            $query->latest();
-        }
 
-        // Pagination
-        $perPage = $request->per_page ?? 12;
-        $products = $query->paginate($perPage);
+            // Filter by brand
+            if ($request->has('brand_id')) {
+                $query->where('brand_id', $request->brand_id);
+            }
+
+            // Filter by new arrivals
+            if ($request->boolean('new_arrivals')) {
+                $query->where('created_at', '>=', now()->subDays(30));
+            }
+
+            // Filter by best sellers
+            if ($request->boolean('best_sellers')) {
+                $query->whereHas('orderItems');
+            }
+
+            // Filter by search
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'LIKE', "%{$search}%")
+                      ->orWhere('description', 'LIKE', "%{$search}%")
+                      ->orWhere('sku', 'LIKE', "%{$search}%")
+                      ->orWhereHas('category', function ($cq) use ($search) {
+                          $cq->where('name', 'LIKE', "%{$search}%");
+                      })
+                      ->orWhereHas('brand', function ($bq) use ($search) {
+                          $bq->where('name', 'LIKE', "%{$search}%");
+                      });
+                });
+            }
+
+            // Filter by price range
+            if ($request->has('min_price')) {
+                $query->where('price', '>=', $request->min_price);
+            }
+            if ($request->has('max_price')) {
+                $query->where('price', '<=', $request->max_price);
+            }
+
+            // Sort
+            if ($request->has('sort')) {
+                switch ($request->sort) {
+                    case 'price_asc':
+                        $query->orderBy('price', 'asc');
+                        break;
+                    case 'price_desc':
+                        $query->orderBy('price', 'desc');
+                        break;
+                    case 'name_asc':
+                        $query->orderBy('name', 'asc');
+                        break;
+                    case 'name_desc':
+                        $query->orderBy('name', 'desc');
+                        break;
+                    case 'popular':
+                        $query->withCount('reviews')->orderBy('reviews_count', 'desc');
+                        break;
+                    default:
+                        $query->latest();
+                }
+            } else {
+                $query->latest();
+            }
+
+            return $query->paginate($request->per_page ?? 12);
+        });
 
         return response()->json($products);
     }
 
     // =========================
-    // GET PRODUCT PRICE RANGE
+    // GET PRODUCT PRICE RANGE (cached)
     // =========================
-    public function priceRange()
+    public function priceRange(?CacheService $cacheService = null)
     {
-        $min = Product::where('stock', '>', 0)->min('price');
-        $max = Product::where('stock', '>', 0)->max('price');
+        $cacheService ??= app(CacheService::class);
 
-        return response()->json([
-            'min_price' => (float) $min,
-            'max_price' => (float) $max,
-        ]);
+        $data = $cacheService->rememberPriceRange(function () {
+            $min = Product::where('stock', '>', 0)->min('price');
+            $max = Product::where('stock', '>', 0)->max('price');
+
+            return ['min_price' => (float) $min, 'max_price' => (float) $max];
+        });
+
+        return response()->json($data);
     }
 
     // =========================
-    // GET BEST SELLERS (top products by order count)
+    // GET BEST SELLERS (cached, top products by order count)
     // =========================
-    public function bestSellers()
+    public function bestSellers(?CacheService $cacheService = null)
     {
-        $products = Product::with('category', 'brand', 'images', 'variants')
-            ->withAvg('reviews', 'rating')
-            ->withCount('reviews')
-            ->where('is_active', true)
-            ->where('stock', '>', 0)
-            ->whereIn('id', function ($query) {
-                $query->select('product_id')
-                    ->from('order_items')
-                    ->groupBy('product_id')
-                    ->havingRaw('COALESCE(SUM(quantity), 0) > 0');
-            })
-            ->withSum('orderItems as total_sold', 'quantity')
-            ->orderBy('total_sold', 'desc')
-            ->limit(8)
-            ->get();
+        $cacheService ??= app(CacheService::class);
+
+        $products = $cacheService->rememberProductCollection('best-sellers', function () {
+            return Product::with('category', 'brand', 'images', 'variants')
+                ->withAvg('reviews', 'rating')
+                ->withCount('reviews')
+                ->where('is_active', true)
+                ->where('stock', '>', 0)
+                ->whereIn('id', function ($query) {
+                    $query->select('product_id')
+                        ->from('order_items')
+                        ->groupBy('product_id')
+                        ->havingRaw('COALESCE(SUM(quantity), 0) > 0');
+                })
+                ->withSum('orderItems as total_sold', 'quantity')
+                ->orderBy('total_sold', 'desc')
+                ->limit(8)
+                ->get();
+        });
 
         return response()->json($products);
     }
 
     // =========================
-    // GET FEATURED PRODUCTS
+    // GET FEATURED PRODUCTS (cached)
     // =========================
-    public function featured()
+    public function featured(?CacheService $cacheService = null)
     {
-        $products = Product::with('category', 'brand', 'images', 'variants')
-            ->withAvg('reviews', 'rating')
-            ->withCount('reviews')
-            ->where('is_active', true)
-            ->where('featured', true)
-            ->where('stock', '>', 0)
-            ->limit(8)
-            ->get();
+        $cacheService ??= app(CacheService::class);
+
+        $products = $cacheService->rememberProductCollection('featured', function () {
+            return Product::with('category', 'brand', 'images', 'variants')
+                ->withAvg('reviews', 'rating')
+                ->withCount('reviews')
+                ->where('is_active', true)
+                ->where('featured', true)
+                ->where('stock', '>', 0)
+                ->limit(8)
+                ->get();
+        });
 
         return response()->json($products);
     }
@@ -187,10 +200,11 @@ class ProductController extends Controller
     }
 
     // =========================
-    // CREATE PRODUCT (ADMIN)
+    // CREATE PRODUCT (ADMIN) — invalidates product caches
     // =========================
     public function store(Request $request)
     {
+        app(CacheService::class)->invalidateProducts();
         $request->validate([
             'category_id' => 'required|exists:categories,id',
             'brand_id' => 'nullable|exists:brands,id',
@@ -291,10 +305,11 @@ class ProductController extends Controller
     }
 
     // =========================
-    // UPDATE PRODUCT (ADMIN)
+    // UPDATE PRODUCT (ADMIN) — invalidates product caches
     // =========================
     public function update(Request $request, $id)
     {
+        app(CacheService::class)->invalidateProducts();
         $product = Product::findOrFail($id);
 
         $request->validate([
@@ -502,11 +517,64 @@ class ProductController extends Controller
     }
 
     // =========================
-    // DELETE PRODUCT (ADMIN)
+    // CHECK PRODUCT REFERENCES (ADMIN) — before deletion
     // =========================
-    public function destroy($id)
+    public function references($id)
     {
         $product = Product::findOrFail($id);
+
+        $references = [
+            'orders'      => $product->orderItems()->count(),
+            'invoices'    => $product->orderItems()
+                ->whereHas('order.invoices')
+                ->count(),
+            'reviews'     => $product->reviews()->count(),
+            'wishlists'   => $product->wishlists()->count(),
+            'carts'       => $product->cart()->count(),
+            'expenses'    => Expense::where('product_id', $product->id)->count(),
+            'coupons'     => Coupon::whereHas('products', fn($q) => $q->where('products.id', $product->id))->count(),
+        ];
+
+        $hasReferences = collect($references)->sum() > 0;
+
+        return response()->json([
+            'has_references' => $hasReferences,
+            'references'     => $references,
+        ]);
+    }
+
+    // =========================
+    // DELETE PRODUCT (ADMIN) — invalidates product caches
+    // =========================
+    public function destroy(Request $request, $id)
+    {
+        app(CacheService::class)->invalidateProducts();
+        $product = Product::findOrFail($id);
+
+        // Check for references unless force flag is set
+        if (!$request->boolean('force')) {
+            $references = [
+                'orders'      => $product->orderItems()->count(),
+                'invoices'    => $product->orderItems()
+                    ->whereHas('order.invoices')
+                    ->count(),
+                'reviews'     => $product->reviews()->count(),
+                'wishlists'   => $product->wishlists()->count(),
+                'carts'       => $product->cart()->count(),
+                'expenses'    => Expense::where('product_id', $product->id)->count(),
+                'coupons'     => Coupon::whereHas('products', fn($q) => $q->where('products.id', $product->id))->count(),
+            ];
+
+            $hasReferences = collect($references)->sum() > 0;
+
+            if ($hasReferences) {
+                return response()->json([
+                    'message'       => 'This product is referenced by existing data and cannot be silently deleted.',
+                    'has_references' => true,
+                    'references'    => $references,
+                ], 409);
+            }
+        }
 
         // Delete thumbnail
         if ($product->thumbnail) {
@@ -522,6 +590,28 @@ class ProductController extends Controller
 
         return response()->json([
             'message' => 'Product deleted successfully'
+        ]);
+    }
+
+    // =========================
+    // BULK UPDATE STATUS (ADMIN)
+    // =========================
+    public function bulkStatus(Request $request)
+    {
+        $request->validate([
+            'ids'       => 'required|array',
+            'ids.*'     => 'integer|exists:products,id',
+            'is_active' => 'required|boolean',
+        ]);
+
+        $count = Product::whereIn('id', $request->ids)
+            ->update(['is_active' => $request->boolean('is_active')]);
+
+        app(CacheService::class)->invalidateProducts();
+
+        return response()->json([
+            'message' => "{$count} product(s) updated successfully.",
+            'count'   => $count,
         ]);
     }
 

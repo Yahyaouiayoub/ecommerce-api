@@ -8,12 +8,49 @@ use App\Models\OrderItem;
 use App\Models\Cart;
 use App\Models\Product;
 use App\Models\Payment;
+use App\Models\Review;
 use App\Models\Revenue;
+use App\Mail\OrderConfirmationMail;
+use App\Services\CouponService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 
 class OrderController extends Controller
 {
+    // =========================
+    // CHECK IF USER CAN REVIEW A PRODUCT
+    // =========================
+    public function eligibleForReview($productId, Request $request)
+    {
+        $user = $request->user();
+
+        // Find delivered orders for this user that contain this product
+        $eligibleOrders = Order::where('user_id', $user->id)
+            ->where('status', 'delivered')
+            ->whereHas('items', function ($q) use ($productId) {
+                $q->where('product_id', $productId);
+            })
+            ->get(['id', 'order_number', 'total_price']);
+
+        // Exclude orders already reviewed for this product
+        $reviewedOrderIds = Review::where('product_id', $productId)
+            ->where('user_id', $user->id)
+            ->pluck('order_id')
+            ->toArray();
+
+        $orders = $eligibleOrders->reject(fn ($o) => in_array($o->id, $reviewedOrderIds))->values();
+
+        return response()->json([
+            'eligible' => $orders->isNotEmpty(),
+            'orders' => $orders->map(fn ($o) => [
+                'id' => $o->id,
+                'order_number' => $o->order_number,
+                'total_price' => $o->total_price,
+            ]),
+        ]);
+    }
+
     // =========================
     // VALID STATUS TRANSITIONS
     // =========================
@@ -125,13 +162,14 @@ class OrderController extends Controller
     // =========================
     // CREATE ORDER (CHECKOUT)
     // =========================
-    public function store(Request $request)
+    public function store(Request $request, ?CouponService $couponService = null)
     {
         $user = auth('sanctum')->user();
 
         $request->validate([
             'payment_method' => 'required|in:cod,card,paypal',
             'shipping_method_id' => 'sometimes|nullable|integer|exists:shipping_methods,id',
+            'coupon_code' => 'nullable|string|max:50',
             'notes' => 'nullable|string',
         ]);
 
@@ -206,8 +244,54 @@ class OrderController extends Controller
             ];
         }
 
+        // ── Coupon validation (manual or auto-apply) ──
+        $discountAmount = 0;
+        $discountType = null;
+        $couponCode = $request->coupon_code;
+        $validatedCoupon = null;
+
+        // Skip coupon logic if coupons are globally disabled
+        $couponsEnabled = (bool) \App\Models\Setting::getValue('coupons_enabled', true);
+        if ($couponService && $couponsEnabled) {
+            $guestEmail = $user ? null : $request->guest_email;
+
+            if ($couponCode) {
+                // Manual coupon code entered by the user
+                $result = $couponService->validate($couponCode, $subtotal, $user, $guestEmail);
+
+                if (!$result['valid']) {
+                    return response()->json([
+                        'message' => $result['message'],
+                    ], 422);
+                }
+
+                $discountAmount = $result['discount'];
+                $discountType = $result['coupon']->type;
+                $validatedCoupon = $result['coupon'];
+            } else {
+                // No code provided — try to auto-apply the best eligible coupon
+                $cartProductIds = $cartItems->pluck('product_id')->toArray();
+
+                $autoResult = $couponService->findBestAutoApply(
+                    $subtotal,
+                    $cartProductIds,
+                    $user,
+                    $guestEmail
+                );
+
+                if ($autoResult && $autoResult['valid']) {
+                    $discountAmount = $autoResult['discount'];
+                    $discountType = $autoResult['coupon']->type;
+                    $couponCode = $autoResult['coupon']->code;
+                    $validatedCoupon = $autoResult['coupon'];
+                }
+            }
+        }
+
         // Calculate full totals (subtotal + shipping + tax) consistent with frontend
-        $totals = $this->calculateOrderTotals($subtotal, $request->shipping_method_id);
+        // Apply discount BEFORE tax calculation so tax is on the discounted amount
+        $discountedSubtotal = round(max(0, $subtotal - $discountAmount), 2);
+        $totals = $this->calculateOrderTotals($discountedSubtotal, $request->shipping_method_id);
 
         $identifier = $this->getCartIdentifier($request);
 
@@ -222,6 +306,9 @@ class OrderController extends Controller
                 'status' => 'pending',
                 'payment_method' => $request->payment_method,
                 'shipping_method_id' => $request->shipping_method_id,
+                'coupon_code' => $couponCode,
+                'discount_amount' => $discountAmount,
+                'discount_type' => $discountType,
                 'notes' => $request->notes,
             ];
 
@@ -304,7 +391,26 @@ class OrderController extends Controller
                 })
                 ->update(['status' => 'converted']);
 
+            // Record coupon usage
+            if ($validatedCoupon && $couponService && $discountAmount > 0) {
+                $couponService->recordUsage($validatedCoupon, $order, $user);
+            }
+
             DB::commit();
+
+            // Send order confirmation email
+            try {
+                $recipient = $user ? $user->email : $request->guest_email;
+                if ($recipient) {
+                    Mail::to($recipient)->send(new OrderConfirmationMail($order));
+                }
+            } catch (\Exception $e) {
+                // Log but don't fail the order if email sending fails
+                logger()->warning('Failed to send order confirmation email', [
+                    'order_id' => $order->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return response()->json([
                 'message' => 'Order created successfully',
@@ -334,12 +440,20 @@ class OrderController extends Controller
         } else {
             $sessionId = $this->getSessionId($request);
             if (!$sessionId) {
-                return response()->json([]);
+                return response()->json([
+                    'data' => [],
+                    'current_page' => 1,
+                    'last_page' => 1,
+                    'per_page' => 20,
+                    'total' => 0,
+                ]);
             }
             $query->where('session_id', $sessionId);
         }
 
-        $orders = $query->latest()->get();
+        $perPage = (int) ($request->per_page ?? 20);
+        $orders = $query->latest()->paginate(min($perPage, 100));
+
         return response()->json($orders);
     }
 

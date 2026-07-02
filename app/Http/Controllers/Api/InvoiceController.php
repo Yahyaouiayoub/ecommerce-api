@@ -61,10 +61,15 @@ class InvoiceController extends Controller
             });
         }
 
-        $invoices = $query->latest()->get();
+        $perPage = (int) ($request->per_page ?? 20);
+        $invoices = $query->latest()->paginate(min($perPage, 100));
 
         return response()->json([
-            'data' => InvoiceResource::collection($invoices),
+            'data' => InvoiceResource::collection($invoices->items()),
+            'current_page' => $invoices->currentPage(),
+            'last_page' => $invoices->lastPage(),
+            'per_page' => $invoices->perPage(),
+            'total' => $invoices->total(),
         ]);
     }
 

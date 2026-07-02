@@ -26,7 +26,9 @@ class BrandController extends Controller
     // =========================
     public function show($id)
     {
-        $brand = Brand::with('products')->findOrFail($id);
+        $brand = Brand::with(['products' => function ($q) {
+            $q->select('id', 'name', 'slug', 'price', 'discount_price', 'stock', 'thumbnail', 'brand_id');
+        }])->findOrFail($id);
         return response()->json($brand);
     }
 

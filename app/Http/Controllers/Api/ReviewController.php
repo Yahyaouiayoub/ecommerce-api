@@ -14,25 +14,40 @@ class ReviewController extends Controller
     // =========================
     // GET REVIEWS FOR A PRODUCT
     // =========================
-    public function index($productId)
+    public function index($productId, Request $request)
     {
         $product = Product::findOrFail($productId);
 
-        $reviews = Review::with('user:id,first_name,last_name,avatar')
+        // Paginate reviews (page of reviews for display)
+        $perPage = (int) ($request->per_page ?? 10);
+        $reviews = Review::approved()
+            ->with('user:id,first_name,last_name,avatar')
             ->where('product_id', $productId)
             ->latest()
-            ->get();
+            ->paginate(min($perPage, 50));
+
+        // Compute rating distribution from the entire review set (single aggregate query)
+        $ratingDistribution = Review::approved()
+            ->where('product_id', $productId)
+            ->selectRaw('rating, COUNT(*) as count')
+            ->groupBy('rating')
+            ->pluck('count', 'rating');
 
         return response()->json([
-            'reviews' => $reviews,
-            'average_rating' => round($product->reviews()->avg('rating') ?? 0, 1),
-            'total_reviews' => $product->reviews()->count(),
+            'reviews' => $reviews->items(),
+            'current_page' => $reviews->currentPage(),
+            'last_page' => $reviews->lastPage(),
+            'per_page' => $reviews->perPage(),
+            'total_reviews' => $reviews->total(),
+            'average_rating' => round(
+                Review::approved()->where('product_id', $productId)->avg('rating') ?? 0, 1
+            ),
             'rating_distribution' => [
-                1 => $product->reviews()->where('rating', 1)->count(),
-                2 => $product->reviews()->where('rating', 2)->count(),
-                3 => $product->reviews()->where('rating', 3)->count(),
-                4 => $product->reviews()->where('rating', 4)->count(),
-                5 => $product->reviews()->where('rating', 5)->count(),
+                1 => (int) ($ratingDistribution[1] ?? 0),
+                2 => (int) ($ratingDistribution[2] ?? 0),
+                3 => (int) ($ratingDistribution[3] ?? 0),
+                4 => (int) ($ratingDistribution[4] ?? 0),
+                5 => (int) ($ratingDistribution[5] ?? 0),
             ],
         ]);
     }
@@ -98,6 +113,7 @@ class ReviewController extends Controller
             'order_id' => $order->id,
             'rating' => $request->rating,
             'comment' => $request->comment,
+            'status'   => 'pending',
         ]);
 
         $review->load('user:id,first_name,last_name,avatar');
